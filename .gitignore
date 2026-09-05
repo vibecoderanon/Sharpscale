@@ -1,0 +1,24 @@
+﻿# Build outputs and object files
+*.o
+*.d
+*.elf
+*.map
+*.lst
+
+# Console homebrew binaries
+*.nro
+*.3dsx
+*.cia
+*.3gx
+*.ovl
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE and OS artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
