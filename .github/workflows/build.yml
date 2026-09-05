@@ -1,0 +1,87 @@
+﻿name: Build Sharpscale Suite
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-switch:
+    name: Build Sharpscale-NX (Switch)
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Switch Plugin and Tesla Overlay
+        run: |
+          cd switch
+          make -j$(nproc)
+
+      - name: Upload Switch Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sharpscale-NX-Artifacts
+          path: |
+            switch/plugin/sharpscale.elf
+            switch/overlay/ovl-sharpscale.ovl
+
+  build-3ds:
+    name: Build Sharpscale-3DS (3DS)
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build 3DS 3GX Plugin, Patcher & Config App
+        run: |
+          cd 3ds
+          make -j$(nproc)
+
+      - name: Upload 3DS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sharpscale-3DS-Artifacts
+          path: |
+            3ds/plugin_3gx/sharpscale.3gx
+            3ds/config_app/Sharpscale-3DS.3dsx
+            3ds/config_app/Sharpscale-3DS.cia
+
+  package-release:
+    name: Package Release Zip
+    needs: [build-switch, build-3ds]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Switch Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Sharpscale-NX-Artifacts
+          path: dist/switch
+
+      - name: Download 3DS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Sharpscale-3DS-Artifacts
+          path: dist/3ds
+
+      - name: Bundle Release Zip
+        run: |
+          mkdir -p release/switch/.overlays release/SaltySD/plugins release/3ds release/luma/plugins
+          cp dist/switch/ovl-sharpscale.ovl release/switch/.overlays/ 2>/dev/null || true
+          cp dist/switch/sharpscale.elf release/SaltySD/plugins/ 2>/dev/null || true
+          cp dist/3ds/Sharpscale-3DS.3dsx release/3ds/ 2>/dev/null || true
+          cp dist/3ds/sharpscale.3gx release/luma/plugins/ 2>/dev/null || true
+          cd release && zip -r ../Sharpscale-MultiConsole-Suite.zip .
+
+      - name: Upload Complete Release Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sharpscale-MultiConsole-Suite
+          path: Sharpscale-MultiConsole-Suite.zip
