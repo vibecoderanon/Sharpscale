@@ -1,4 +1,4 @@
-﻿# Build outputs and object files
+# Build outputs and object files
 *.o
 *.d
 *.elf
@@ -11,6 +11,11 @@
 *.cia
 *.3gx
 *.ovl
+
+# Track standalone release distribution packages
+!release/**
+!release/Sharpscale-MultiConsole-Suite.zip
+dist/
 
 # Python cache
 __pycache__/
