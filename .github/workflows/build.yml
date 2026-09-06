@@ -111,10 +111,10 @@ jobs:
           mkdir -p release/3ds
           mkdir -p release/luma/plugins
 
-          cp dist/switch/ovl-sharpscale.ovl release/switch/.overlays/
-          cp dist/switch/sharpscale.elf release/SaltySD/plugins/
-          cp dist/3ds/Sharpscale-3DS.3dsx release/3ds/
-          cp dist/3ds/sharpscale.3gx release/luma/plugins/
+          find dist -name "ovl-sharpscale.ovl" -exec cp {} release/switch/.overlays/ \;
+          find dist -name "sharpscale.elf" -exec cp {} release/SaltySD/plugins/ \;
+          find dist -name "Sharpscale-3DS.3dsx" -exec cp {} release/3ds/ \;
+          find dist -name "sharpscale.3gx" -exec cp {} release/luma/plugins/ \;
           cp 3ds/firm_patcher/sharpscale_firm_patcher.py release/3ds/
 
           cd release && zip -r ../Sharpscale-MultiConsole-Suite.zip .
