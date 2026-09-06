@@ -4,6 +4,7 @@
 [![Platform: Nintendo Switch](https://img.shields.io/badge/Platform-Nintendo_Switch-red.svg)](docs/SWITCH_GUIDE.md)
 [![Platform: Nintendo 3DS](https://img.shields.io/badge/Platform-Nintendo_3DS-orange.svg)](docs/3DS_GUIDE.md)
 [![License: MIT / GPLv3](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
+[![Web Portal](https://img.shields.io/badge/Web_Portal-View_Suite-3b82f6?style=for-the-badge&logo=googlechrome&logoColor=white)](https://vibecoderanon.github.io/#sharpscale)
 
 **Sharpscale** is a suite of homebrew display plugins and utilities designed to eliminate blurry hardware scaling filters and deliver crisp, clean, and pixel-perfect video output across game consoles.
 
@@ -15,9 +16,17 @@ Originally created for the PlayStation Vita / PlayStation TV by [Electry](https:
 
 ## Quick Navigation
 
+- [Online Web Portal](#online-web-portal)
 - [Architecture & Display Subsystems Deep-Dive](docs/ARCHITECTURE.md)
 - [Nintendo Switch Guide & Installation](docs/SWITCH_GUIDE.md)
 - [Nintendo 3DS Guide & Installation](docs/3DS_GUIDE.md)
+
+---
+
+## Online Web Portal
+
+Access the web portal documentation, console capture showcase, and multi-console release packages directly at:
+**[https://vibecoderanon.github.io/#sharpscale](https://vibecoderanon.github.io/#sharpscale)**
 
 ---
 
