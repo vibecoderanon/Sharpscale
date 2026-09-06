@@ -11,6 +11,7 @@
 *.cia
 *.3gx
 *.ovl
+*.love
 
 # Track standalone release distribution packages
 !release/**

@@ -12,32 +12,98 @@ permissions:
   contents: write
 
 jobs:
-  build-and-package:
-    name: Build & Release Sharpscale Suite
+  build-switch:
+    name: Build Sharpscale-NX (Switch)
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkita64:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up libtesla dependency
+        run: |
+          git clone --depth 1 https://github.com/WerWolv/libtesla.git /tmp/libtesla
+          mkdir -p /opt/devkitpro/libtesla/include
+          cp -r /tmp/libtesla/include/* /opt/devkitpro/libtesla/include/
+
+      - name: Compile Switch Plugin & Tesla Overlay
+        run: |
+          cd switch
+          make clean
+          make -j$(nproc)
+
+      - name: Upload Switch Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sharpscale-NX-Artifacts
+          path: |
+            switch/plugin/sharpscale.elf
+            switch/overlay/ovl-sharpscale.ovl
+
+  build-3ds:
+    name: Build Sharpscale-3DS (3DS)
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm:latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install 3gxtool
+        run: |
+          dkp-pacman -S --noconfirm 3gxtool || true
+
+      - name: Compile 3DS Targets (3GX & Config App)
+        run: |
+          cd 3ds
+          make clean
+          make -j$(nproc)
+
+      - name: Upload 3DS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sharpscale-3DS-Artifacts
+          path: |
+            3ds/config_app/Sharpscale-3DS.3dsx
+            3ds/plugin_3gx/sharpscale.3gx
+
+  package-release:
+    name: Package Suite & Publish GitHub Release
+    needs: [build-switch, build-3ds]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Download Switch Artifacts
+        uses: actions/download-artifact@v4
         with:
-          python-version: '3.12'
+          name: Sharpscale-NX-Artifacts
+          path: dist/switch
 
-      - name: Build Standalone Production Binaries & Suite Zip
+      - name: Download 3DS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: Sharpscale-3DS-Artifacts
+          path: dist/3ds
+
+      - name: Assemble SD Card Structure & Zip
         run: |
-          python3 build_release.py
+          mkdir -p release/switch/.overlays
+          mkdir -p release/SaltySD/plugins
+          mkdir -p release/3ds
+          mkdir -p release/luma/plugins
 
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Sharpscale-MultiConsole-Suite
-          path: |
-            release/Sharpscale-MultiConsole-Suite.zip
-            release/switch/.overlays/ovl-sharpscale.ovl
-            release/SaltySD/plugins/sharpscale.elf
-            release/3ds/Sharpscale-3DS.3dsx
-            release/luma/plugins/sharpscale.3gx
+          cp dist/switch/ovl-sharpscale.ovl release/switch/.overlays/
+          cp dist/switch/sharpscale.elf release/SaltySD/plugins/
+          cp dist/3ds/Sharpscale-3DS.3dsx release/3ds/
+          cp dist/3ds/sharpscale.3gx release/luma/plugins/
+          cp 3ds/firm_patcher/sharpscale_firm_patcher.py release/3ds/
+
+          cd release && zip -r ../Sharpscale-MultiConsole-Suite.zip .
+          cd ..
+          mv Sharpscale-MultiConsole-Suite.zip release/
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
@@ -53,20 +119,23 @@ jobs:
             release/SaltySD/plugins/sharpscale.elf
             release/3ds/Sharpscale-3DS.3dsx
             release/luma/plugins/sharpscale.3gx
+            release/3ds/sharpscale_firm_patcher.py
           body: |
             ## Sharpscale Multi-Console Suite v1.0.0
+
+            Official production build compiled directly from source using **devkitA64** and **devkitARM**.
 
             Hardware display plugins and utilities designed to eliminate blurry hardware scaling filters and deliver crisp, clean, and pixel-perfect video output across Nintendo Switch and Nintendo 3DS.
 
             ### Package Contents:
             - **`Sharpscale-MultiConsole-Suite.zip`**: All-in-one pre-packaged zip ready to extract to SD card root (`sdmc:/`).
-            - **`ovl-sharpscale.ovl`**: Tesla Menu overlay for on-the-fly configuration (`sdmc:/switch/.overlays/`).
-            - **`sharpscale.elf`**: SaltyNX VI/NVN hook plugin (`sdmc:/SaltySD/plugins/`).
-            - **`Sharpscale-3DS.3dsx`**: Nintendo 3DS Homebrew Configurator (`sdmc:/3ds/`).
-            - **`sharpscale.3gx`**: Luma3DS in-game 3GX plugin (`sdmc:/luma/plugins/`).
+            - **`ovl-sharpscale.ovl`**: Genuine Tesla Menu overlay (`sdmc:/switch/.overlays/`).
+            - **`sharpscale.elf`**: Genuine SaltyNX VI/NVN hook plugin (`sdmc:/SaltySD/plugins/`).
+            - **`Sharpscale-3DS.3dsx`**: Genuine Nintendo 3DS Homebrew Configurator (`sdmc:/3ds/`).
+            - **`sharpscale.3gx`**: Genuine Luma3DS in-game 3GX plugin (`sdmc:/luma/plugins/`).
+            - **`sharpscale_firm_patcher.py`**: Standalone PC/console FIRM scaling matrix patcher.
 
-            ### SD Card Installation
+            ### SD Card Installation:
             1. Extract `Sharpscale-MultiConsole-Suite.zip` directly to the root of your SD card.
             2. For Switch: Open the Tesla Overlay with `L + D-Pad Down + R3` to configure scaling mode in real time.
             3. For 3DS: Enable game patching in Luma3DS configuration, then launch any title or use the Configurator app.
-
