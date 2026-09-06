@@ -3,9 +3,9 @@
 #---------------------------------------------------------------------------------
 TARGET := sharpscale
 
-CC := arm-none-eabi-gcc
-CFLAGS := -Wall -O3 -marm -mcpu=mpcore -mfloat-abi=hard -mtp=soft -Iinclude -isystem $(DEVKITPRO)/libctru/include
-LDFLAGS := -specs=3dsx.specs -L$(DEVKITPRO)/libctru/lib -lctru
+ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
+CFLAGS := $(ARCH) -Wall -O3 -marm -Iinclude -isystem $(DEVKITPRO)/libctru/include
+LDFLAGS := -specs=3dsx.specs $(ARCH) -L$(DEVKITPRO)/libctru/lib -lctru
 
 SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:.c=.o)

@@ -28,6 +28,7 @@ jobs:
       - name: Set up libtesla dependency
         run: |
           git clone --depth 1 https://github.com/WerWolv/libtesla.git /tmp/libtesla
+          sed -i 's/this->m_scissoringStack.emplace(x, y, w, h);/this->m_scissoringStack.push({x, y, w, h});/' /tmp/libtesla/include/tesla.hpp
           mkdir -p /opt/devkitpro/libtesla/include
           cp -r /tmp/libtesla/include/* /opt/devkitpro/libtesla/include/
 

@@ -4,7 +4,7 @@
 TARGET := ovl-sharpscale
 
 CXX := aarch64-none-elf-g++
-CXXFLAGS := -Wall -O3 -std=gnu++17 -fPIC -fvisibility=hidden -Iinclude -I../plugin/include -isystem $(DEVKITPRO)/libnx/include -isystem $(DEVKITPRO)/libtesla/include
+CXXFLAGS := -Wall -O3 -std=gnu++20 -fPIC -fvisibility=hidden -Iinclude -I../plugin/include -isystem $(DEVKITPRO)/libnx/include -isystem $(DEVKITPRO)/libtesla/include
 LDFLAGS := -shared -nostdlib -Wl,-Bsymbolic -L$(DEVKITPRO)/libnx/lib -lnx
 
 SRCS := $(wildcard src/*.cpp) ../plugin/src/config.c
