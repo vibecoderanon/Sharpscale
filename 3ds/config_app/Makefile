@@ -3,6 +3,7 @@
 #---------------------------------------------------------------------------------
 TARGET := Sharpscale-3DS
 
+CC  := arm-none-eabi-gcc
 ARCH := -march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 CFLAGS := $(ARCH) -Wall -O3 -marm -D__3DS__ -Iinclude -I../plugin_3gx/include -isystem $(DEVKITPRO)/libctru/include
 LDFLAGS := -specs=3dsx.specs $(ARCH) -L$(DEVKITPRO)/libctru/lib -lctru
@@ -18,7 +19,7 @@ $(TARGET).3dsx: $(TARGET).elf
 $(TARGET).elf: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) -o $@
 
-%.o: %.c
+src/%.o: src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

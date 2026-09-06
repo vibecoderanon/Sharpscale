@@ -61,10 +61,14 @@ jobs:
 
       - name: Set up 3gxtool
         run: |
-          if ! grep -Fxq "[thepixellizeross-lib]" /etc/pacman.conf; then
-            echo -e "\n[thepixellizeross-lib]\nServer = https://thepixellizeross.gitlab.io/packages/any\nSigLevel = Optional" >> /etc/pacman.conf
+          git clone --depth 1 https://gitlab.com/ThePixellizerOSS/3gxtool.git /tmp/3gxtool || true
+          if [ -d /tmp/3gxtool ]; then
+            cmake -B /tmp/3gxtool/build -S /tmp/3gxtool || true
+            cmake --build /tmp/3gxtool/build -j$(nproc) || true
+            if [ -f /tmp/3gxtool/build/3gxtool ]; then
+              cp /tmp/3gxtool/build/3gxtool /opt/devkitpro/tools/bin/
+            fi
           fi
-          dkp-pacman -Sy --noconfirm 3gxtool || true
 
       - name: Compile 3DS Targets (3GX & Config App)
         run: |
