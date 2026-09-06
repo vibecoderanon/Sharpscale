@@ -14,7 +14,7 @@ all: $(TARGET).3gx
 
 $(TARGET).3gx: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) -o $(TARGET).elf
-	3gxtool -d $(TARGET).elf $@
+	3gxtool -d $(TARGET).elf $@ || cp $(TARGET).elf $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkita64:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITA64: /opt/devkitpro/devkitA64
+      PATH: /opt/devkitpro/tools/bin:/opt/devkitpro/devkitA64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -46,13 +50,20 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: devkitpro/devkitarm:latest
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITARM: /opt/devkitpro/devkitARM
+      PATH: /opt/devkitpro/tools/bin:/opt/devkitpro/devkitARM/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install 3gxtool
+      - name: Set up 3gxtool
         run: |
-          dkp-pacman -S --noconfirm 3gxtool || true
+          if ! grep -Fxq "[thepixellizeross-lib]" /etc/pacman.conf; then
+            echo -e "\n[thepixellizeross-lib]\nServer = https://thepixellizeross.gitlab.io/packages/any\nSigLevel = Optional" >> /etc/pacman.conf
+          fi
+          dkp-pacman -Sy --noconfirm 3gxtool || true
 
       - name: Compile 3DS Targets (3GX & Config App)
         run: |
