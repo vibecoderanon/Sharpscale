@@ -1,0 +1,15 @@
+﻿Author: vibecoderanon
+
+Version:
+    Major: 1
+    Minor: 0
+    Revision: 0
+
+Targets:
+
+Title: Sharpscale-3DS
+
+Summary: Integer & Pixel-Perfect Display Scaling Plugin for Nintendo 3DS
+
+Description: |
+  Hardware display scaler and aspect ratio configuration plugin for Luma3DS.
