@@ -1,6 +1,8 @@
 #include "scaler.h"
-#include <math.h>
-#include <stdlib.h>
+
+static inline int32_t round_f_to_i(float v) {
+    return (int32_t)(v >= 0.0f ? (v + 0.5f) : (v - 0.5f));
+}
 
 uint32_t scaler_get_max_integer_scale(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h) {
     if (src_w == 0 || src_h == 0) return 1;
@@ -110,11 +112,11 @@ void scaler_calculate_viewport(
             if (display_aspect > target_aspect) {
                 /* Pillarboxed (vertical fit) */
                 vp_h = (int32_t)dst_h;
-                vp_w = (int32_t)roundf((float)dst_h * target_aspect);
+                vp_w = round_f_to_i((float)dst_h * target_aspect);
             } else {
                 /* Letterboxed (horizontal fit) */
                 vp_w = (int32_t)dst_w;
-                vp_h = (int32_t)roundf((float)dst_w / target_aspect);
+                vp_h = round_f_to_i((float)dst_w / target_aspect);
             }
 
             out_viewport->width = vp_w;

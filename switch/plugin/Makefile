@@ -6,7 +6,7 @@ TARGET := sharpscale
 
 CC := aarch64-none-elf-gcc
 ARCH := -march=armv8-a -mtune=cortex-a57 -mtp=soft -fPIE
-CFLAGS := -Wall -O2 -ffunction-sections -fdata-sections $(ARCH) -Iinclude -isystem $(DEVKITPRO)/libnx/include
+CFLAGS := -Wall -O2 -ffunction-sections -fdata-sections $(ARCH) -D__SWITCH_PLUGIN__ -Iinclude -isystem $(DEVKITPRO)/libnx/include
 LDFLAGS := -z max-page-size=0x1000 -T rel.ld -g -shared -nostdlib -Wl,-Bsymbolic
 
 C_SRCS := $(wildcard src/*.c)
