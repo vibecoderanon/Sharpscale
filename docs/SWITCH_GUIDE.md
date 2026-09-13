@@ -18,10 +18,16 @@
 
 ---
 
-## Requirements
-- Nintendo Switch running **Atmosphere Custom Firmware** (1.5.0 or newer).
-- **SaltyNX** (for title-level GPU/VI interception).
-- **Tesla Menu** (`nx-ovlloader` and `ovlmenu`) for the overlay interface.
+## Requirements & Prerequisites
+
+> [!IMPORTANT]
+> **SaltyNX and Tesla Menu must be installed first.** Sharpscale-NX does not bundle the SaltyNX background daemon or the Tesla loader. You must have both installed before copying Sharpscale-NX files.
+
+- Nintendo Switch running **[Atmosphère Custom Firmware](https://github.com/Atmosphere-NX/Atmosphere)** (1.5.0 or newer).
+- **[SaltyNX](https://github.com/masagrator/SaltyNX)** (Required for title-level NVN / VI GPU interception; installed to `atmosphere/contents/0000000000534C54/`).
+- **Tesla Menu Environment** (for the on-screen configuration overlay):
+  - **[nx-ovlloader](https://github.com/WerWolv/nx-ovlloader)** (Sysmodule overlay host).
+  - **[Tesla-Menu / ovlmenu](https://github.com/WerWolv/Tesla-Menu)** (Overlay menu front-end).
 
 ---
 

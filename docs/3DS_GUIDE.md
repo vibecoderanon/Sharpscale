@@ -21,10 +21,10 @@
 
 ---
 
-## Requirements
-- Nintendo 3DS / New 3DS / 2DS running **Luma3DS** custom firmware (v10.0 or newer).
+## Requirements & Prerequisites
+- Nintendo 3DS / New 3DS / 2DS running **[Luma3DS](https://github.com/LumaTeam/Luma3DS)** custom firmware (v10.0 or newer).
 - Luma3DS **"Enable loading external FIRMs and modules"** option enabled in Luma boot config (`Hold SELECT on boot`).
-- Luma3DS **"Enable plugin loader"** option enabled for the 3GX plugin.
+- Luma3DS **"Enable plugin loader"** option enabled for the 3GX plugin (in Rosalina menu: `L + D-Pad Down + Select`).
 
 ---
 
