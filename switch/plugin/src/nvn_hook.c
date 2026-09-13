@@ -186,113 +186,70 @@ void nvn_hook_command_buffer_set_scissors(void* cmdBuf, int start, int count, co
 
 void* nvn_hook_device_get_proc_address(void* device, const char* name) {
     if (!name) return NULL;
-    g_nvn_state.nvn_device = device;
+    if (device) g_nvn_state.nvn_device = device;
 
-    if (fast_strcmp(name, "nvnQueuePresentTexture") == 0) {
-        if (!g_nvn_state.orig_nvnQueuePresentTexture && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnQueuePresentTexture = (PFN_nvnQueuePresentTexture)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+    void* address = NULL;
+    if (g_nvn_state.orig_nvnDeviceGetProcAddress) {
+        address = g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+    } else if (orig_nvnBootstrapLoader) {
+        g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)orig_nvnBootstrapLoader("nvnDeviceGetProcAddress");
+        if (g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            address = g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
         }
+    }
+
+    if (!address) return NULL;
+
+    if (fast_strcmp(name, "nvnDeviceGetProcAddress") == 0) {
+        return (void*)nvn_hook_device_get_proc_address;
+    }
+    if (fast_strcmp(name, "nvnQueuePresentTexture") == 0) {
+        g_nvn_state.orig_nvnQueuePresentTexture = (PFN_nvnQueuePresentTexture)address;
         return (void*)nvn_hook_queue_present_texture;
     }
-
     if (fast_strcmp(name, "nvnWindowBuilderSetTextures") == 0) {
-        if (!g_nvn_state.orig_nvnWindowBuilderSetTextures && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnWindowBuilderSetTextures = (PFN_nvnWindowBuilderSetTextures)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
+        g_nvn_state.orig_nvnWindowBuilderSetTextures = (PFN_nvnWindowBuilderSetTextures)address;
         return (void*)nvn_hook_window_builder_set_textures;
     }
-
     if (fast_strcmp(name, "nvnCommandBufferSetViewport") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetViewport && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnCommandBufferSetViewport = (PFN_nvnCommandBufferSetViewport)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
+        g_nvn_state.orig_nvnCommandBufferSetViewport = (PFN_nvnCommandBufferSetViewport)address;
         return (void*)nvn_hook_command_buffer_set_viewport;
     }
-
     if (fast_strcmp(name, "nvnCommandBufferSetViewports") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetViewports && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnCommandBufferSetViewports = (PFN_nvnCommandBufferSetViewports)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
+        g_nvn_state.orig_nvnCommandBufferSetViewports = (PFN_nvnCommandBufferSetViewports)address;
         return (void*)nvn_hook_command_buffer_set_viewports;
     }
-
     if (fast_strcmp(name, "nvnCommandBufferSetScissor") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetScissor && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnCommandBufferSetScissor = (PFN_nvnCommandBufferSetScissor)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
+        g_nvn_state.orig_nvnCommandBufferSetScissor = (PFN_nvnCommandBufferSetScissor)address;
         return (void*)nvn_hook_command_buffer_set_scissor;
     }
-
     if (fast_strcmp(name, "nvnCommandBufferSetScissors") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetScissors && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
+        g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)address;
         return (void*)nvn_hook_command_buffer_set_scissors;
     }
-
     if (fast_strcmp(name, "nvnTextureGetWidth") == 0) {
-        if (!g_nvn_state.orig_nvnTextureGetWidth && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
-        return (void*)g_nvn_state.orig_nvnTextureGetWidth;
+        g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)address;
+        return address;
     }
-
     if (fast_strcmp(name, "nvnTextureGetHeight") == 0) {
-        if (!g_nvn_state.orig_nvnTextureGetHeight && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnTextureGetHeight = (PFN_nvnTextureGetHeight)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-        }
-        return (void*)g_nvn_state.orig_nvnTextureGetHeight;
+        g_nvn_state.orig_nvnTextureGetHeight = (PFN_nvnTextureGetHeight)address;
+        return address;
     }
 
-    if (g_nvn_state.orig_nvnDeviceGetProcAddress) {
-        return g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
-    }
-
-    return NULL;
+    return address;
 }
 
 void* nvn_hook_bootstrap_loader(const char* name) {
     if (!name) return NULL;
-    void* ptr = orig_nvnBootstrapLoader ? orig_nvnBootstrapLoader(name) : NULL;
 
     if (fast_strcmp(name, "nvnDeviceGetProcAddress") == 0) {
-        g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)ptr;
+        if (!g_nvn_state.orig_nvnDeviceGetProcAddress && orig_nvnBootstrapLoader) {
+            g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)orig_nvnBootstrapLoader("nvnDeviceGetProcAddress");
+        }
         return (void*)nvn_hook_device_get_proc_address;
     }
-    if (fast_strcmp(name, "nvnQueuePresentTexture") == 0) {
-        if (!g_nvn_state.orig_nvnQueuePresentTexture) g_nvn_state.orig_nvnQueuePresentTexture = (PFN_nvnQueuePresentTexture)ptr;
-        return (void*)nvn_hook_queue_present_texture;
-    }
-    if (fast_strcmp(name, "nvnWindowBuilderSetTextures") == 0) {
-        if (!g_nvn_state.orig_nvnWindowBuilderSetTextures) g_nvn_state.orig_nvnWindowBuilderSetTextures = (PFN_nvnWindowBuilderSetTextures)ptr;
-        return (void*)nvn_hook_window_builder_set_textures;
-    }
-    if (fast_strcmp(name, "nvnCommandBufferSetViewport") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetViewport) g_nvn_state.orig_nvnCommandBufferSetViewport = (PFN_nvnCommandBufferSetViewport)ptr;
-        return (void*)nvn_hook_command_buffer_set_viewport;
-    }
-    if (fast_strcmp(name, "nvnCommandBufferSetViewports") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetViewports) g_nvn_state.orig_nvnCommandBufferSetViewports = (PFN_nvnCommandBufferSetViewports)ptr;
-        return (void*)nvn_hook_command_buffer_set_viewports;
-    }
-    if (fast_strcmp(name, "nvnCommandBufferSetScissor") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetScissor) g_nvn_state.orig_nvnCommandBufferSetScissor = (PFN_nvnCommandBufferSetScissor)ptr;
-        return (void*)nvn_hook_command_buffer_set_scissor;
-    }
-    if (fast_strcmp(name, "nvnCommandBufferSetScissors") == 0) {
-        if (!g_nvn_state.orig_nvnCommandBufferSetScissors) g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)ptr;
-        return (void*)nvn_hook_command_buffer_set_scissors;
-    }
-    if (fast_strcmp(name, "nvnTextureGetWidth") == 0) {
-        if (!g_nvn_state.orig_nvnTextureGetWidth) g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)ptr;
-        return (void*)g_nvn_state.orig_nvnTextureGetWidth;
-    }
-    if (fast_strcmp(name, "nvnTextureGetHeight") == 0) {
-        if (!g_nvn_state.orig_nvnTextureGetHeight) g_nvn_state.orig_nvnTextureGetHeight = (PFN_nvnTextureGetHeight)ptr;
-        return (void*)g_nvn_state.orig_nvnTextureGetHeight;
-    }
 
-    return ptr;
+    return orig_nvnBootstrapLoader ? orig_nvnBootstrapLoader(name) : NULL;
 }
 
 void* nvn_hook_get_proc_address(void* device, const char* name) {
@@ -308,9 +265,10 @@ bool nvn_hook_init(void) {
             orig_nvnBootstrapLoader = (PFN_nvnBootstrapLoader)SaltySDCore_FindSymbol("nvnBootstrapLoader");
         }
         if (orig_nvnBootstrapLoader) {
+            g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)orig_nvnBootstrapLoader("nvnDeviceGetProcAddress");
             SaltySDCore_ReplaceImport("nvnBootstrapLoader", (void*)nvn_hook_bootstrap_loader);
             if (&SaltySDCore_printf) {
-                SaltySDCore_printf("Sharpscale: nvnBootstrapLoader hooked\n");
+                SaltySDCore_printf("Sharpscale: nvnBootstrapLoader hooked (orig_dev_get_proc=%p)\n", g_nvn_state.orig_nvnDeviceGetProcAddress);
             }
             g_nvn_state.is_installed = true;
             return true;

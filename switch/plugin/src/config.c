@@ -63,7 +63,7 @@ void config_load_defaults(SharpscaleConfig* config) {
     for (size_t i = 0; i < sizeof(SharpscaleConfig); i++) p[i] = 0;
 
     config->title_id = 0;
-    config->scaling_mode = SCALING_MODE_INTEGER;
+    config->scaling_mode = SCALING_MODE_ORIGINAL;
     config->filter_type = FILTER_TYPE_POINT;
     config->aspect_ratio = ASPECT_RATIO_AUTO;
     config->sharpness_strength = 80;

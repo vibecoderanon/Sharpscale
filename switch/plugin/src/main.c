@@ -13,6 +13,7 @@ static uint32_t g_last_seq = 0;
 /* SaltySD dynamic symbols exported by saltynx_core.elf */
 extern uint64_t SaltySD_CheckIfSharedMemoryAvailable(ptrdiff_t *offset, uint64_t size) __attribute__((weak));
 extern uint64_t SaltySD_GetSharedMemoryHandle(uint32_t *retrieve) __attribute__((weak));
+extern void SaltySDCore_printf(const char* format, ...) __attribute__((weak));
 
 typedef struct {
     uint64_t base_addr;
@@ -52,18 +53,23 @@ static inline uint32_t raw_svcMapSharedMemory(uint32_t handle, void* address, si
     return (uint32_t)x0;
 }
 
-static inline uint64_t get_current_title_id(void) {
-    uint64_t title_id = 0;
-    register uint64_t x0 __asm__("x0") = (uint64_t)&title_id;
-    register uint64_t x1 __asm__("x1") = 18; // InfoType_ProgramId
-    register uint64_t x2 __asm__("x2") = 0xFFFF8001ULL; // PseudoHandle_CurrentProcess
-    register uint64_t x3 __asm__("x3") = 0;
+static inline uint32_t raw_svcGetInfo(uint64_t* out, uint32_t id0, uint64_t handle, uint64_t id1) {
+    register uint64_t x0 __asm__("x0") = (uint64_t)out;
+    register uint64_t x1 __asm__("x1") = (uint64_t)id0;
+    register uint64_t x2 __asm__("x2") = handle;
+    register uint64_t x3 __asm__("x3") = id1;
     __asm__ __volatile__ (
         "svc 0x29"
         : "+r"(x0)
         : "r"(x1), "r"(x2), "r"(x3)
         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
     );
+    return (uint32_t)x0;
+}
+
+static inline uint64_t get_current_title_id(void) {
+    uint64_t title_id = 0;
+    raw_svcGetInfo(&title_id, 18 /* InfoType_ProgramId */, 0xFFFF8001ULL, 0);
     return title_id;
 }
 
@@ -106,16 +112,32 @@ static void sharpscale_apply_title_profile(uint64_t title_id) {
     }
 }
 
-static void* find_free_address(size_t size) {
-    uint64_t addr = 0x80000000ULL;
+static void* find_free_aslr_address(size_t size) {
+    uint64_t aslr_base = 0, aslr_size = 0;
+    uint32_t rc1 = raw_svcGetInfo(&aslr_base, 12 /* InfoType_AslrRegionAddress */, 0xFFFF8001ULL, 0);
+    uint32_t rc2 = raw_svcGetInfo(&aslr_size, 13 /* InfoType_AslrRegionSize */, 0xFFFF8001ULL, 0);
+
+    if (rc1 != 0 || rc2 != 0 || aslr_size == 0) {
+        // Fallback to alias region if ASLR region query fails
+        raw_svcGetInfo(&aslr_base, 2 /* InfoType_AliasRegionAddress */, 0xFFFF8001ULL, 0);
+        raw_svcGetInfo(&aslr_size, 3 /* InfoType_AliasRegionSize */, 0xFFFF8001ULL, 0);
+    }
+
+    if (aslr_size == 0) return NULL;
+
+    // Scan for unmapped space inside the ASLR region
+    // Start scanning 512MB into ASLR region to avoid collisions with game binary segments
+    uint64_t addr = aslr_base + 0x20000000ULL;
+    if (addr >= aslr_base + aslr_size) addr = aslr_base + 0x200000ULL;
+
     SwitchMemoryInfo minfo;
     uint32_t pinfo = 0;
-    while (addr < 0x7FFFFFF000ULL) {
+    while (addr < aslr_base + aslr_size - size) {
         if (raw_svcQueryMemory(&minfo, &pinfo, addr) != 0) {
             addr += 0x200000;
             continue;
         }
-        if (minfo.type == 0 && minfo.size >= size) {
+        if (minfo.type == 0 && minfo.size >= size && minfo.base_addr >= aslr_base) {
             return (void*)minfo.base_addr;
         }
         if (minfo.size == 0) break;
@@ -132,9 +154,12 @@ static void sharpscale_init_shmem(void) {
             uint32_t handle = 0;
             rc = SaltySD_GetSharedMemoryHandle(&handle);
             if (rc == 0 && handle != 0) {
-                void* map_addr = find_free_address(0x1000);
+                void* map_addr = find_free_aslr_address(0x1000);
                 if (map_addr) {
                     uint32_t map_rc = raw_svcMapSharedMemory(handle, map_addr, 0x1000, 3 /* Perm_Rw */);
+                    if (&SaltySDCore_printf) {
+                        SaltySDCore_printf("Sharpscale: shmem map_addr=%p, rc=0x%x, offset=%ld\n", map_addr, map_rc, (long)offset);
+                    }
                     if (map_rc == 0) {
                         g_shmem = (SharpscaleSharedMemory*)((uint8_t*)map_addr + offset);
                         g_shmem->magic = SHARPSCALE_SHMEM_MAGIC;
@@ -153,8 +178,14 @@ static void sharpscale_init_shmem(void) {
                         g_shmem->dst_width = g_config.dst_width;
                         g_shmem->dst_height = g_config.dst_height;
                     }
+                } else if (&SaltySDCore_printf) {
+                    SaltySDCore_printf("Sharpscale: find_free_aslr_address failed\n");
                 }
+            } else if (&SaltySDCore_printf) {
+                SaltySDCore_printf("Sharpscale: SaltySD_GetSharedMemoryHandle failed rc=0x%lx\n", rc);
             }
+        } else if (&SaltySDCore_printf) {
+            SaltySDCore_printf("Sharpscale: SaltySD_CheckIfSharedMemoryAvailable failed rc=0x%lx\n", rc);
         }
     }
 }

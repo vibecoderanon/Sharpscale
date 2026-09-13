@@ -121,6 +121,19 @@ void MainGui::saveConfig() {
 void MainGui::updateTelemetry() {
     if (!m_status_item) return;
 
+    if (!s_shmem_ptr && s_shmem_mapped) {
+        uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
+        if (base) {
+            for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
+                SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
+                if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
+                    s_shmem_ptr = probe;
+                    break;
+                }
+            }
+        }
+    }
+
     if (s_shmem_ptr && s_shmem_ptr->is_plugin_alive) {
         m_status_item->setValue(s_shmem_ptr->is_docked ? "Active (Docked)" : "Active (Handheld)");
         if (m_res_item && s_shmem_ptr->src_width > 0) {
@@ -132,7 +145,7 @@ void MainGui::updateTelemetry() {
         }
         if (m_viewport_item && s_shmem_ptr->vp_w > 0) {
             char vp_buf[64];
-            snprintf(vp_buf, sizeof(vp_buf), "%ux%u at (%u,%u)",
+            snprintf(vp_buf, sizeof(vp_buf), "%ux%u @ (%u,%u)",
                 s_shmem_ptr->vp_w, s_shmem_ptr->vp_h,
                 s_shmem_ptr->vp_x, s_shmem_ptr->vp_y);
             m_viewport_item->setValue(vp_buf);
