@@ -4,6 +4,7 @@
 
 /* Weak SaltySD Core symbols for dynamic interception and logging */
 extern void* SaltySDCore_FindSymbol(const char* name) __attribute__((weak));
+extern void* SaltySDCore_FindSymbolBuiltin(const char* name) __attribute__((weak));
 extern void SaltySDCore_ReplaceImport(const char* name, void* new_func) __attribute__((weak));
 extern void SaltySDCore_printf(const char* format, ...) __attribute__((weak));
 
@@ -251,11 +252,46 @@ void* nvn_hook_device_get_proc_address(void* device, const char* name) {
 }
 
 void* nvn_hook_bootstrap_loader(const char* name) {
+    if (!name) return NULL;
     void* ptr = orig_nvnBootstrapLoader ? orig_nvnBootstrapLoader(name) : NULL;
-    if (name && fast_strcmp(name, "nvnDeviceGetProcAddress") == 0) {
+
+    if (fast_strcmp(name, "nvnDeviceGetProcAddress") == 0) {
         g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)ptr;
         return (void*)nvn_hook_device_get_proc_address;
     }
+    if (fast_strcmp(name, "nvnQueuePresentTexture") == 0) {
+        if (!g_nvn_state.orig_nvnQueuePresentTexture) g_nvn_state.orig_nvnQueuePresentTexture = (PFN_nvnQueuePresentTexture)ptr;
+        return (void*)nvn_hook_queue_present_texture;
+    }
+    if (fast_strcmp(name, "nvnWindowBuilderSetTextures") == 0) {
+        if (!g_nvn_state.orig_nvnWindowBuilderSetTextures) g_nvn_state.orig_nvnWindowBuilderSetTextures = (PFN_nvnWindowBuilderSetTextures)ptr;
+        return (void*)nvn_hook_window_builder_set_textures;
+    }
+    if (fast_strcmp(name, "nvnCommandBufferSetViewport") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetViewport) g_nvn_state.orig_nvnCommandBufferSetViewport = (PFN_nvnCommandBufferSetViewport)ptr;
+        return (void*)nvn_hook_command_buffer_set_viewport;
+    }
+    if (fast_strcmp(name, "nvnCommandBufferSetViewports") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetViewports) g_nvn_state.orig_nvnCommandBufferSetViewports = (PFN_nvnCommandBufferSetViewports)ptr;
+        return (void*)nvn_hook_command_buffer_set_viewports;
+    }
+    if (fast_strcmp(name, "nvnCommandBufferSetScissor") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetScissor) g_nvn_state.orig_nvnCommandBufferSetScissor = (PFN_nvnCommandBufferSetScissor)ptr;
+        return (void*)nvn_hook_command_buffer_set_scissor;
+    }
+    if (fast_strcmp(name, "nvnCommandBufferSetScissors") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetScissors) g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)ptr;
+        return (void*)nvn_hook_command_buffer_set_scissors;
+    }
+    if (fast_strcmp(name, "nvnTextureGetWidth") == 0) {
+        if (!g_nvn_state.orig_nvnTextureGetWidth) g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)ptr;
+        return (void*)g_nvn_state.orig_nvnTextureGetWidth;
+    }
+    if (fast_strcmp(name, "nvnTextureGetHeight") == 0) {
+        if (!g_nvn_state.orig_nvnTextureGetHeight) g_nvn_state.orig_nvnTextureGetHeight = (PFN_nvnTextureGetHeight)ptr;
+        return (void*)g_nvn_state.orig_nvnTextureGetHeight;
+    }
+
     return ptr;
 }
 
@@ -264,8 +300,13 @@ void* nvn_hook_get_proc_address(void* device, const char* name) {
 }
 
 bool nvn_hook_init(void) {
-    if (&SaltySDCore_FindSymbol && &SaltySDCore_ReplaceImport) {
-        orig_nvnBootstrapLoader = (PFN_nvnBootstrapLoader)SaltySDCore_FindSymbol("nvnBootstrapLoader");
+    if (&SaltySDCore_ReplaceImport) {
+        if (&SaltySDCore_FindSymbolBuiltin) {
+            orig_nvnBootstrapLoader = (PFN_nvnBootstrapLoader)SaltySDCore_FindSymbolBuiltin("nvnBootstrapLoader");
+        }
+        if (!orig_nvnBootstrapLoader && &SaltySDCore_FindSymbol) {
+            orig_nvnBootstrapLoader = (PFN_nvnBootstrapLoader)SaltySDCore_FindSymbol("nvnBootstrapLoader");
+        }
         if (orig_nvnBootstrapLoader) {
             SaltySDCore_ReplaceImport("nvnBootstrapLoader", (void*)nvn_hook_bootstrap_loader);
             if (&SaltySDCore_printf) {
