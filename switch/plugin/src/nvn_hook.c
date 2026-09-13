@@ -20,36 +20,6 @@ static inline int fast_strcmp(const char* s1, const char* s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-void nvn_hook_window_set_crop(void* window, int x, int y, int w, int h) {
-    SharpscaleConfig* cfg = sharpscale_get_config();
-
-    /* Record engine-requested source render dimensions and display mode */
-    if (w > 0 && h > 0) {
-        if (w > 1280 || h > 720) {
-            vi_hook_set_docked(true);
-        }
-        if (cfg->src_width != (uint32_t)w || cfg->src_height != (uint32_t)h) {
-            uint32_t dst_w = cfg->is_docked ? 1920 : 1280;
-            uint32_t dst_h = cfg->is_docked ? 1080 : 720;
-            sharpscale_update_viewport((uint32_t)w, (uint32_t)h, dst_w, dst_h);
-        }
-    }
-
-    if (g_nvn_state.orig_nvnWindowSetCrop) {
-        if (cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
-            g_nvn_state.orig_nvnWindowSetCrop(
-                window,
-                (int)cfg->calculated_viewport.x,
-                (int)cfg->calculated_viewport.y,
-                (int)cfg->calculated_viewport.width,
-                (int)cfg->calculated_viewport.height
-            );
-        } else {
-            g_nvn_state.orig_nvnWindowSetCrop(window, x, y, w, h);
-        }
-    }
-}
-
 void nvn_hook_queue_present_texture(void* queue, void* window, int texture_idx) {
     g_nvn_state.nvn_queue = queue;
     g_nvn_state.nvn_window = window;
@@ -57,23 +27,159 @@ void nvn_hook_queue_present_texture(void* queue, void* window, int texture_idx) 
     /* Check for live settings update from Tesla Overlay via SharedMemory */
     sharpscale_check_live_updates();
 
+    if (g_nvn_state.orig_nvnQueuePresentTexture) {
+        g_nvn_state.orig_nvnQueuePresentTexture(queue, window, texture_idx);
+    }
+}
+
+void nvn_hook_window_builder_set_textures(void* builder, int numTextures, void** textures) {
+    if (g_nvn_state.orig_nvnWindowBuilderSetTextures) {
+        g_nvn_state.orig_nvnWindowBuilderSetTextures(builder, numTextures, textures);
+    }
+
+    if (numTextures > 0 && textures && textures[0]) {
+        uint32_t w = 0, h = 0;
+        if (g_nvn_state.orig_nvnTextureGetWidth) {
+            w = (uint32_t)g_nvn_state.orig_nvnTextureGetWidth(textures[0]);
+        }
+        if (g_nvn_state.orig_nvnTextureGetHeight) {
+            h = (uint32_t)g_nvn_state.orig_nvnTextureGetHeight(textures[0]);
+        }
+
+        if (w > 0 && h > 0) {
+            SharpscaleConfig* cfg = sharpscale_get_config();
+            cfg->dst_width = w;
+            cfg->dst_height = h;
+            cfg->is_docked = (w > 1280 || h > 720);
+            vi_hook_set_docked(cfg->is_docked);
+            sharpscale_apply_settings();
+
+            if (&SaltySDCore_printf) {
+                SaltySDCore_printf("Sharpscale: Window swapchain surface: %ux%u (docked=%d)\n", w, h, cfg->is_docked);
+            }
+        }
+    }
+}
+
+static int s_last_vp_x = -999, s_last_vp_y = -999, s_last_vp_w = -999, s_last_vp_h = -999;
+
+void nvn_hook_command_buffer_set_viewport(void* cmdBuf, int x, int y, int width, int height) {
     SharpscaleConfig* cfg = sharpscale_get_config();
 
-    /* Enforce viewport crop when custom scaling is active */
-    if (window && g_nvn_state.orig_nvnWindowSetCrop) {
-        if (cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
-            g_nvn_state.orig_nvnWindowSetCrop(
-                window,
+    if (x != s_last_vp_x || y != s_last_vp_y || width != s_last_vp_w || height != s_last_vp_h) {
+        s_last_vp_x = x; s_last_vp_y = y; s_last_vp_w = width; s_last_vp_h = height;
+        if (&SaltySDCore_printf) {
+            SaltySDCore_printf("Sharpscale: SetViewport(%d, %d, %d, %d)\n", x, y, width, height);
+        }
+    }
+
+    /* Intercept the main display/presentation viewport pass */
+    bool is_main_pass = (width == (int)cfg->dst_width && height == (int)cfg->dst_height) ||
+                        (width >= 1280 && height >= 720 && x == 0 && y == 0);
+
+    if (is_main_pass && cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
+        if (g_nvn_state.orig_nvnCommandBufferSetViewport) {
+            g_nvn_state.orig_nvnCommandBufferSetViewport(
+                cmdBuf,
                 (int)cfg->calculated_viewport.x,
                 (int)cfg->calculated_viewport.y,
                 (int)cfg->calculated_viewport.width,
                 (int)cfg->calculated_viewport.height
             );
         }
+        return;
     }
 
-    if (g_nvn_state.orig_nvnQueuePresentTexture) {
-        g_nvn_state.orig_nvnQueuePresentTexture(queue, window, texture_idx);
+    if (g_nvn_state.orig_nvnCommandBufferSetViewport) {
+        g_nvn_state.orig_nvnCommandBufferSetViewport(cmdBuf, x, y, width, height);
+    }
+}
+
+void nvn_hook_command_buffer_set_scissor(void* cmdBuf, int x, int y, int width, int height) {
+    SharpscaleConfig* cfg = sharpscale_get_config();
+
+    bool is_main_pass = (width == (int)cfg->dst_width && height == (int)cfg->dst_height) ||
+                        (width >= 1280 && height >= 720 && x == 0 && y == 0);
+
+    if (is_main_pass && cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
+        if (g_nvn_state.orig_nvnCommandBufferSetScissor) {
+            g_nvn_state.orig_nvnCommandBufferSetScissor(
+                cmdBuf,
+                (int)cfg->calculated_viewport.x,
+                (int)cfg->calculated_viewport.y,
+                (int)cfg->calculated_viewport.width,
+                (int)cfg->calculated_viewport.height
+            );
+        }
+        return;
+    }
+
+    if (g_nvn_state.orig_nvnCommandBufferSetScissor) {
+        g_nvn_state.orig_nvnCommandBufferSetScissor(cmdBuf, x, y, width, height);
+    }
+}
+
+void nvn_hook_command_buffer_set_viewports(void* cmdBuf, int start, int count, const void* viewports) {
+    SharpscaleConfig* cfg = sharpscale_get_config();
+
+    if (cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0 &&
+        count > 0 && count <= 16 && viewports) {
+        NVNviewport vps[16];
+        const NVNviewport* src_vps = (const NVNviewport*)viewports;
+        bool modified = false;
+
+        for (int i = 0; i < count; i++) {
+            vps[i] = src_vps[i];
+            if ((vps[i].width == (float)cfg->dst_width && vps[i].height == (float)cfg->dst_height) ||
+                (vps[i].width >= 1280.0f && vps[i].height >= 720.0f && vps[i].x == 0.0f && vps[i].y == 0.0f)) {
+                vps[i].x = (float)cfg->calculated_viewport.x;
+                vps[i].y = (float)cfg->calculated_viewport.y;
+                vps[i].width = (float)cfg->calculated_viewport.width;
+                vps[i].height = (float)cfg->calculated_viewport.height;
+                modified = true;
+            }
+        }
+
+        if (modified && g_nvn_state.orig_nvnCommandBufferSetViewports) {
+            g_nvn_state.orig_nvnCommandBufferSetViewports(cmdBuf, start, count, vps);
+            return;
+        }
+    }
+
+    if (g_nvn_state.orig_nvnCommandBufferSetViewports) {
+        g_nvn_state.orig_nvnCommandBufferSetViewports(cmdBuf, start, count, viewports);
+    }
+}
+
+void nvn_hook_command_buffer_set_scissors(void* cmdBuf, int start, int count, const void* scissors) {
+    SharpscaleConfig* cfg = sharpscale_get_config();
+
+    if (cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0 &&
+        count > 0 && count <= 16 && scissors) {
+        NVNscissor scs[16];
+        const NVNscissor* src_scs = (const NVNscissor*)scissors;
+        bool modified = false;
+
+        for (int i = 0; i < count; i++) {
+            scs[i] = src_scs[i];
+            if ((scs[i].width == (int)cfg->dst_width && scs[i].height == (int)cfg->dst_height) ||
+                (scs[i].width >= 1280 && scs[i].height >= 720 && scs[i].x == 0 && scs[i].y == 0)) {
+                scs[i].x = (int)cfg->calculated_viewport.x;
+                scs[i].y = (int)cfg->calculated_viewport.y;
+                scs[i].width = (int)cfg->calculated_viewport.width;
+                scs[i].height = (int)cfg->calculated_viewport.height;
+                modified = true;
+            }
+        }
+
+        if (modified && g_nvn_state.orig_nvnCommandBufferSetScissors) {
+            g_nvn_state.orig_nvnCommandBufferSetScissors(cmdBuf, start, count, scs);
+            return;
+        }
+    }
+
+    if (g_nvn_state.orig_nvnCommandBufferSetScissors) {
+        g_nvn_state.orig_nvnCommandBufferSetScissors(cmdBuf, start, count, scissors);
     }
 }
 
@@ -85,17 +191,56 @@ void* nvn_hook_device_get_proc_address(void* device, const char* name) {
         if (!g_nvn_state.orig_nvnQueuePresentTexture && g_nvn_state.orig_nvnDeviceGetProcAddress) {
             g_nvn_state.orig_nvnQueuePresentTexture = (PFN_nvnQueuePresentTexture)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
         }
-        if (!g_nvn_state.orig_nvnWindowSetCrop && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnWindowSetCrop = (PFN_nvnWindowSetCrop)g_nvn_state.orig_nvnDeviceGetProcAddress(device, "nvnWindowSetCrop");
-        }
         return (void*)nvn_hook_queue_present_texture;
     }
 
-    if (fast_strcmp(name, "nvnWindowSetCrop") == 0) {
-        if (!g_nvn_state.orig_nvnWindowSetCrop && g_nvn_state.orig_nvnDeviceGetProcAddress) {
-            g_nvn_state.orig_nvnWindowSetCrop = (PFN_nvnWindowSetCrop)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+    if (fast_strcmp(name, "nvnWindowBuilderSetTextures") == 0) {
+        if (!g_nvn_state.orig_nvnWindowBuilderSetTextures && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnWindowBuilderSetTextures = (PFN_nvnWindowBuilderSetTextures)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
         }
-        return (void*)nvn_hook_window_set_crop;
+        return (void*)nvn_hook_window_builder_set_textures;
+    }
+
+    if (fast_strcmp(name, "nvnCommandBufferSetViewport") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetViewport && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnCommandBufferSetViewport = (PFN_nvnCommandBufferSetViewport)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)nvn_hook_command_buffer_set_viewport;
+    }
+
+    if (fast_strcmp(name, "nvnCommandBufferSetViewports") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetViewports && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnCommandBufferSetViewports = (PFN_nvnCommandBufferSetViewports)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)nvn_hook_command_buffer_set_viewports;
+    }
+
+    if (fast_strcmp(name, "nvnCommandBufferSetScissor") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetScissor && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnCommandBufferSetScissor = (PFN_nvnCommandBufferSetScissor)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)nvn_hook_command_buffer_set_scissor;
+    }
+
+    if (fast_strcmp(name, "nvnCommandBufferSetScissors") == 0) {
+        if (!g_nvn_state.orig_nvnCommandBufferSetScissors && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)nvn_hook_command_buffer_set_scissors;
+    }
+
+    if (fast_strcmp(name, "nvnTextureGetWidth") == 0) {
+        if (!g_nvn_state.orig_nvnTextureGetWidth && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)g_nvn_state.orig_nvnTextureGetWidth;
+    }
+
+    if (fast_strcmp(name, "nvnTextureGetHeight") == 0) {
+        if (!g_nvn_state.orig_nvnTextureGetHeight && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+            g_nvn_state.orig_nvnTextureGetHeight = (PFN_nvnTextureGetHeight)g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+        return (void*)g_nvn_state.orig_nvnTextureGetHeight;
     }
 
     if (g_nvn_state.orig_nvnDeviceGetProcAddress) {
@@ -112,28 +257,6 @@ void* nvn_hook_bootstrap_loader(const char* name) {
         return (void*)nvn_hook_device_get_proc_address;
     }
     return ptr;
-}
-
-void nvn_hook_apply_scaling(void* window, uint32_t src_w, uint32_t src_h) {
-    if (!window) return;
-
-    SharpscaleConfig* cfg = sharpscale_get_config();
-    uint32_t dst_w = cfg->is_docked ? 1920 : 1280;
-    uint32_t dst_h = cfg->is_docked ? 1080 : 720;
-
-    if (cfg->src_width != src_w || cfg->src_height != src_h) {
-        sharpscale_update_viewport(src_w, src_h, dst_w, dst_h);
-    }
-
-    if (g_nvn_state.orig_nvnWindowSetCrop && cfg->scaling_mode != SCALING_MODE_ORIGINAL) {
-        g_nvn_state.orig_nvnWindowSetCrop(
-            window,
-            (int)cfg->calculated_viewport.x,
-            (int)cfg->calculated_viewport.y,
-            (int)cfg->calculated_viewport.width,
-            (int)cfg->calculated_viewport.height
-        );
-    }
 }
 
 void* nvn_hook_get_proc_address(void* device, const char* name) {

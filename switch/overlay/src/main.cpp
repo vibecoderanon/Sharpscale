@@ -58,7 +58,9 @@ std::unique_ptr<tsl::Gui> SharpscaleOverlay::loadInitialGui() {
     return std::make_unique<MainGui>();
 }
 
-MainGui::MainGui() : m_current_title_id(0), m_is_game_running(false) {
+MainGui::MainGui() : m_current_title_id(0), m_is_game_running(false),
+    m_status_item(nullptr), m_res_item(nullptr), m_viewport_item(nullptr),
+    m_mode_item(nullptr), m_filter_item(nullptr), m_aspect_item(nullptr) {
     s32 num_pids = 0;
     u64 pids[64] = {0};
     if (R_SUCCEEDED(svcGetProcessList(&num_pids, pids, 64))) {
@@ -116,98 +118,130 @@ void MainGui::saveConfig() {
     }
 }
 
+void MainGui::updateTelemetry() {
+    if (!m_status_item) return;
+
+    if (s_shmem_ptr && s_shmem_ptr->is_plugin_alive) {
+        m_status_item->setValue(s_shmem_ptr->is_docked ? "Active (Docked)" : "Active (Handheld)");
+        if (m_res_item && s_shmem_ptr->src_width > 0) {
+            char res_buf[64];
+            snprintf(res_buf, sizeof(res_buf), "%ux%u -> %ux%u",
+                s_shmem_ptr->src_width, s_shmem_ptr->src_height,
+                s_shmem_ptr->vp_w, s_shmem_ptr->vp_h);
+            m_res_item->setValue(res_buf);
+        }
+        if (m_viewport_item && s_shmem_ptr->vp_w > 0) {
+            char vp_buf[64];
+            snprintf(vp_buf, sizeof(vp_buf), "%ux%u at (%u,%u)",
+                s_shmem_ptr->vp_w, s_shmem_ptr->vp_h,
+                s_shmem_ptr->vp_x, s_shmem_ptr->vp_y);
+            m_viewport_item->setValue(vp_buf);
+        }
+    } else if (m_is_game_running) {
+        m_status_item->setValue("Hooked");
+    } else {
+        m_status_item->setValue("Standby");
+    }
+}
+
 tsl::elm::Element* MainGui::createUI() {
     auto frame = new tsl::elm::OverlayFrame("Sharpscale-NX", "v" SHARPSCALE_NX_VERSION_STRING);
     auto list = new tsl::elm::List();
 
     // Section 0: Engine & Game Status
-    list->addItem(new tsl::elm::CategoryHeader("Sharpscale-NX Engine"));
+    list->addItem(new tsl::elm::CategoryHeader("Sharpscale Engine"));
 
-    char status_buf[96];
-    if (s_shmem_ptr && s_shmem_ptr->is_plugin_alive) {
-        snprintf(status_buf, sizeof(status_buf), "Active (%ux%u -> %ux%u)",
-            s_shmem_ptr->src_width, s_shmem_ptr->src_height,
-            s_shmem_ptr->vp_w, s_shmem_ptr->vp_h);
-    } else if (m_is_game_running) {
-        snprintf(status_buf, sizeof(status_buf), "Hooked (Title: %016llX)", (unsigned long long)m_current_title_id);
-    } else {
-        snprintf(status_buf, sizeof(status_buf), "Standby (No game active)");
+    m_status_item = new tsl::elm::ListItem("Status");
+    m_res_item = new tsl::elm::ListItem("Resolution");
+    m_viewport_item = new tsl::elm::ListItem("Viewport");
+
+    updateTelemetry();
+
+    list->addItem(m_status_item);
+    if (m_is_game_running) {
+        char title_buf[32];
+        snprintf(title_buf, sizeof(title_buf), "%016llX", (unsigned long long)m_current_title_id);
+        auto titleItem = new tsl::elm::ListItem("Title ID");
+        titleItem->setValue(title_buf);
+        list->addItem(titleItem);
     }
-    auto statusItem = new tsl::elm::ListItem("Engine Status");
-    statusItem->setValue(status_buf);
-    list->addItem(statusItem);
+    list->addItem(m_res_item);
+    list->addItem(m_viewport_item);
 
     // Section 1: Scaling Mode
     list->addItem(new tsl::elm::CategoryHeader("Display Scaling"));
 
     const std::vector<std::string> scaling_modes = {
-        "Original (System Bilinear)",
-        "Integer (Pixel Perfect Max Fit)",
-        "Real (1:1 Native Centered)",
-        "Fit (Aspect Correct Fit)"
+        "Original",
+        "Integer",
+        "Real (1:1)",
+        "Fit"
     };
 
-    auto modeItem = new tsl::elm::ListItem("Scaling Mode");
-    modeItem->setValue(scaling_modes[m_config.scaling_mode]);
-    modeItem->setClickListener([this, modeItem, scaling_modes](u64 keys) {
+    m_mode_item = new tsl::elm::ListItem("Scaling Mode");
+    m_mode_item->setValue(scaling_modes[m_config.scaling_mode]);
+    m_mode_item->setClickListener([this, scaling_modes](u64 keys) {
         if (keys & HidNpadButton_A) {
             m_config.scaling_mode = static_cast<SharpscaleScalingMode>((m_config.scaling_mode + 1) % 4);
-            modeItem->setValue(scaling_modes[m_config.scaling_mode]);
+            m_mode_item->setValue(scaling_modes[m_config.scaling_mode]);
             saveConfig();
+            updateTelemetry();
             return true;
         }
         return false;
     });
-    list->addItem(modeItem);
+    list->addItem(m_mode_item);
 
     // Section 2: Filtering & Post-Processing
     list->addItem(new tsl::elm::CategoryHeader("Filters & Sharpening"));
 
     const std::vector<std::string> filter_types = {
-        "Point (Nearest Neighbor)",
+        "Point (Nearest)",
         "Bilinear",
         "Sharp Bilinear",
-        "AMD CAS (Contrast Adaptive)",
-        "Bicubic Spline"
+        "AMD CAS",
+        "Bicubic"
     };
 
-    auto filterItem = new tsl::elm::ListItem("Filter Type");
-    filterItem->setValue(filter_types[m_config.filter_type]);
-    filterItem->setClickListener([this, filterItem, filter_types](u64 keys) {
+    m_filter_item = new tsl::elm::ListItem("Filter Type");
+    m_filter_item->setValue(filter_types[m_config.filter_type]);
+    m_filter_item->setClickListener([this, filter_types](u64 keys) {
         if (keys & HidNpadButton_A) {
             m_config.filter_type = static_cast<SharpscaleFilterType>((m_config.filter_type + 1) % 5);
-            filterItem->setValue(filter_types[m_config.filter_type]);
+            m_filter_item->setValue(filter_types[m_config.filter_type]);
             saveConfig();
+            updateTelemetry();
             return true;
         }
         return false;
     });
-    list->addItem(filterItem);
+    list->addItem(m_filter_item);
 
     // Section 3: Aspect Ratio Override
     list->addItem(new tsl::elm::CategoryHeader("Geometry & Aspect Ratio"));
 
     const std::vector<std::string> aspect_ratios = {
-        "Auto (Game Default)",
-        "16:9 Widescreen",
-        "4:3 Retro Standard",
-        "3:2 GBA Native",
-        "1:1 Square Pixel",
-        "10:9 Game Boy Native"
+        "Auto",
+        "16:9",
+        "4:3",
+        "3:2 (GBA)",
+        "1:1",
+        "10:9 (GB)"
     };
 
-    auto aspectItem = new tsl::elm::ListItem("Aspect Ratio");
-    aspectItem->setValue(aspect_ratios[m_config.aspect_ratio]);
-    aspectItem->setClickListener([this, aspectItem, aspect_ratios](u64 keys) {
+    m_aspect_item = new tsl::elm::ListItem("Aspect Ratio");
+    m_aspect_item->setValue(aspect_ratios[m_config.aspect_ratio]);
+    m_aspect_item->setClickListener([this, aspect_ratios](u64 keys) {
         if (keys & HidNpadButton_A) {
             m_config.aspect_ratio = static_cast<SharpscaleAspectRatio>((m_config.aspect_ratio + 1) % 6);
-            aspectItem->setValue(aspect_ratios[m_config.aspect_ratio]);
+            m_aspect_item->setValue(aspect_ratios[m_config.aspect_ratio]);
             saveConfig();
+            updateTelemetry();
             return true;
         }
         return false;
     });
-    list->addItem(aspectItem);
+    list->addItem(m_aspect_item);
 
     // Section 4: Capture & Lossless Output
     list->addItem(new tsl::elm::CategoryHeader("Video Capture"));
@@ -215,6 +249,7 @@ tsl::elm::Element* MainGui::createUI() {
     captureToggle->setStateChangedListener([this](bool state) {
         m_config.force_1080p_capture = state;
         saveConfig();
+        updateTelemetry();
     });
     list->addItem(captureToggle);
 
@@ -223,7 +258,7 @@ tsl::elm::Element* MainGui::createUI() {
 }
 
 void MainGui::update() {
-    // Handle dynamic state changes
+    updateTelemetry();
 }
 
 int main(int argc, char **argv) {

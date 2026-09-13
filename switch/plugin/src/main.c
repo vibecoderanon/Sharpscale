@@ -52,6 +52,60 @@ static inline uint32_t raw_svcMapSharedMemory(uint32_t handle, void* address, si
     return (uint32_t)x0;
 }
 
+static inline uint64_t get_current_title_id(void) {
+    uint64_t title_id = 0;
+    register uint64_t x0 __asm__("x0") = (uint64_t)&title_id;
+    register uint64_t x1 __asm__("x1") = 18; // InfoType_ProgramId
+    register uint64_t x2 __asm__("x2") = 0xFFFF8001ULL; // PseudoHandle_CurrentProcess
+    register uint64_t x3 __asm__("x3") = 0;
+    __asm__ __volatile__ (
+        "svc 0x29"
+        : "+r"(x0)
+        : "r"(x1), "r"(x2), "r"(x3)
+        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
+    );
+    return title_id;
+}
+
+static void sharpscale_apply_title_profile(uint64_t title_id) {
+    g_config.title_id = title_id;
+
+    switch (title_id) {
+        case 0x0100C62011050000ULL: /* NSO Game Boy Advance */
+            g_config.src_width = 240;
+            g_config.src_height = 160;
+            g_config.aspect_ratio = ASPECT_RATIO_3_2;
+            break;
+        case 0x010012F017576000ULL: /* NSO Game Boy / Game Boy Color */
+            g_config.src_width = 160;
+            g_config.src_height = 144;
+            g_config.aspect_ratio = ASPECT_RATIO_10_9;
+            break;
+        case 0x0100D870045B6000ULL: /* NSO NES / Famicom */
+            g_config.src_width = 256;
+            g_config.src_height = 240;
+            g_config.aspect_ratio = ASPECT_RATIO_4_3;
+            break;
+        case 0x01008D300C50C000ULL: /* NSO Super NES / Super Famicom */
+            g_config.src_width = 256;
+            g_config.src_height = 224;
+            g_config.aspect_ratio = ASPECT_RATIO_4_3;
+            break;
+        case 0x0100C9A00ECE6000ULL: /* NSO Nintendo 64 */
+            g_config.src_width = 320;
+            g_config.src_height = 240;
+            g_config.aspect_ratio = ASPECT_RATIO_4_3;
+            break;
+        case 0x01006BB00C6F0000ULL: /* NSO Sega Genesis / Mega Drive */
+            g_config.src_width = 320;
+            g_config.src_height = 224;
+            g_config.aspect_ratio = ASPECT_RATIO_4_3;
+            break;
+        default:
+            break;
+    }
+}
+
 static void* find_free_address(size_t size) {
     uint64_t addr = 0x80000000ULL;
     SwitchMemoryInfo minfo;
@@ -136,6 +190,8 @@ void sharpscale_apply_settings(void) {
     g_config.is_docked = vi_hook_is_docked();
     uint32_t dst_w = g_config.is_docked ? 1920 : 1280;
     uint32_t dst_h = g_config.is_docked ? 1080 : 720;
+    if (g_config.dst_width > 0) dst_w = g_config.dst_width;
+    if (g_config.dst_height > 0) dst_h = g_config.dst_height;
 
     if (g_config.src_width > 0 && g_config.src_height > 0) {
         sharpscale_update_viewport(g_config.src_width, g_config.src_height, dst_w, dst_h);
@@ -190,6 +246,12 @@ void sharpscale_init(void) {
 
     config_load_defaults(&g_config);
     config_load_global(&g_config);
+
+    uint64_t tid = get_current_title_id();
+    if (tid != 0) {
+        sharpscale_apply_title_profile(tid);
+        config_load_title(tid, &g_config);
+    }
 
     sharpscale_init_shmem();
 

@@ -19,6 +19,13 @@ private:
     uint64_t m_current_title_id;
     bool m_is_game_running;
 
+    tsl::elm::ListItem* m_status_item;
+    tsl::elm::ListItem* m_res_item;
+    tsl::elm::ListItem* m_viewport_item;
+    tsl::elm::ListItem* m_mode_item;
+    tsl::elm::ListItem* m_filter_item;
+    tsl::elm::ListItem* m_aspect_item;
+
 public:
     MainGui();
     virtual tsl::elm::Element* createUI() override;
@@ -27,6 +34,7 @@ public:
 private:
     void refreshConfig();
     void saveConfig();
+    void updateTelemetry();
 };
 
 #endif // SHARPSCALE_OVERLAY_HPP
