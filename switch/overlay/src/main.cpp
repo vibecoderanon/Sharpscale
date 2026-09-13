@@ -20,7 +20,7 @@ void SharpscaleOverlay::initServices() {
             shmemLoadRemote(&s_shmem, s_remote_shmem_handle, 0x1000, Perm_Rw);
             if (R_SUCCEEDED(shmemMap(&s_shmem))) {
                 s_shmem_mapped = true;
-                uint8_t* base = (uint8_t*)shmemGetMapAddress(&s_shmem);
+                uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
                 if (base) {
                     for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
                         SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
@@ -59,8 +59,10 @@ std::unique_ptr<tsl::Gui> SharpscaleOverlay::loadInitialGui() {
 }
 
 MainGui::MainGui() : m_current_title_id(0), m_is_game_running(false) {
-    tsl::hlp::doWithProcessList([this](const u64* pids, size_t count) {
-        for (size_t i = 0; i < count; i++) {
+    s32 num_pids = 0;
+    u64 pids[64] = {0};
+    if (R_SUCCEEDED(svcGetProcessList(&num_pids, pids, 64))) {
+        for (s32 i = 0; i < num_pids; i++) {
             u64 tid = 0;
             if (R_SUCCEEDED(pminfoGetProgramId(&tid, pids[i]))) {
                 if (tid >= 0x0100000000010000ULL && tid <= 0x01FFFFFFFFFFFFFFULL) {
@@ -70,7 +72,7 @@ MainGui::MainGui() : m_current_title_id(0), m_is_game_running(false) {
                 }
             }
         }
-    });
+    }
 
     refreshConfig();
 }
@@ -91,7 +93,7 @@ void MainGui::saveConfig() {
     }
 
     if (!s_shmem_ptr && s_shmem_mapped) {
-        uint8_t* base = (uint8_t*)shmemGetMapAddress(&s_shmem);
+        uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
         if (base) {
             for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
                 SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
