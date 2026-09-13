@@ -206,7 +206,7 @@ void sharpscale_apply_settings(void) {
         case SCALING_MODE_FIT:
         case SCALING_MODE_CUSTOM:
             vi_hook_set_scaling_mode(VI_SCALING_MODE_EXACT);
-            vi_hook_set_layer_crop(0, 0, (int32_t)g_config.src_width, (int32_t)g_config.src_height);
+            vi_hook_set_layer_crop(0, 0, (int32_t)dst_w, (int32_t)dst_h);
             vi_hook_set_layer_position((float)g_config.calculated_viewport.x, (float)g_config.calculated_viewport.y);
             vi_hook_set_layer_size(g_config.calculated_viewport.width, g_config.calculated_viewport.height);
             break;
