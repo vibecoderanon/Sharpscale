@@ -1,5 +1,6 @@
 #include "nvn_hook.h"
 #include "scaler.h"
+#include "vi_hook.h"
 
 /* Weak SaltySD Core symbols for dynamic interception and logging */
 extern void* SaltySDCore_FindSymbol(const char* name) __attribute__((weak));
@@ -22,8 +23,11 @@ static inline int fast_strcmp(const char* s1, const char* s2) {
 void nvn_hook_window_set_crop(void* window, int x, int y, int w, int h) {
     SharpscaleConfig* cfg = sharpscale_get_config();
 
-    /* Record engine-requested source render dimensions */
+    /* Record engine-requested source render dimensions and display mode */
     if (w > 0 && h > 0) {
+        if (w > 1280 || h > 720) {
+            vi_hook_set_docked(true);
+        }
         if (cfg->src_width != (uint32_t)w || cfg->src_height != (uint32_t)h) {
             uint32_t dst_w = cfg->is_docked ? 1920 : 1280;
             uint32_t dst_h = cfg->is_docked ? 1080 : 720;

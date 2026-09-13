@@ -30,6 +30,7 @@ void vi_hook_set_layer_crop(int32_t left, int32_t top, int32_t right, int32_t bo
 void vi_hook_set_layer_position(float x, float y);
 void vi_hook_set_layer_size(int32_t width, int32_t height);
 bool vi_hook_is_docked(void);
+void vi_hook_set_docked(bool docked);
 
 #ifdef __cplusplus
 }
