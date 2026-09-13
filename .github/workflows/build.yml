@@ -106,32 +106,7 @@ jobs:
 
       - name: Assemble SD Card Structure & Zip
         run: |
-          rm -rf release
-          mkdir -p release/switch/.overlays
-          mkdir -p release/switch/sharpscale/titles
-          mkdir -p release/SaltySD/plugins
-          mkdir -p release/3ds
-          mkdir -p release/luma/plugins
-
-          find dist -name "ovl-sharpscale.ovl" -exec cp {} release/switch/.overlays/ \;
-          find dist -name "sharpscale.elf" -exec cp {} release/SaltySD/plugins/ \;
-          find dist -name "Sharpscale-3DS.3dsx" -exec cp {} release/3ds/ \;
-          find dist -name "sharpscale.3gx" -exec cp {} release/luma/plugins/ \;
-          cp 3ds/firm_patcher/sharpscale_firm_patcher.py release/3ds/
-
-          cat << 'EOF' > release/switch/sharpscale/config.ini
-[sharpscale]
-scaling_mode = 1
-filter_type = 0
-aspect_ratio = 0
-sharpness = 100
-force_1080p = 0
-show_osd = 1
-EOF
-
-          cd release && zip -r ../Sharpscale-MultiConsole-Suite.zip .
-          cd ..
-          mv Sharpscale-MultiConsole-Suite.zip release/
+          python3 build_release.py
 
       - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
