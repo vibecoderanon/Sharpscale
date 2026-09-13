@@ -20,6 +20,10 @@ __nx_mod0:
 .org _start+0x80
 entrypoint:
     // SaltyNX plugin entrypoint called via elf_trampoline
-    // Returns 0 safely to SaltySD loader
+    // Branch with link to sharpscale_init
+    stp x29, x30, [sp, #-16]!
+    mov x29, sp
+    bl sharpscale_init
+    ldp x29, x30, [sp], #16
     mov x0, #0
     ret

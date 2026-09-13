@@ -22,12 +22,29 @@ def package_suite():
 
     # SD Card directory layout
     switch_overlay_dir = os.path.join(RELEASE_DIR, "switch", ".overlays")
+    switch_config_dir = os.path.join(RELEASE_DIR, "switch", "sharpscale")
+    switch_title_dir = os.path.join(switch_config_dir, "titles")
     saltysd_plugin_dir = os.path.join(RELEASE_DIR, "SaltySD", "plugins")
     ctr_app_dir = os.path.join(RELEASE_DIR, "3ds")
     luma_plugin_dir = os.path.join(RELEASE_DIR, "luma", "plugins")
 
-    for d in [switch_overlay_dir, saltysd_plugin_dir, ctr_app_dir, luma_plugin_dir]:
+    for d in [switch_overlay_dir, switch_config_dir, switch_title_dir, saltysd_plugin_dir, ctr_app_dir, luma_plugin_dir]:
         os.makedirs(d, exist_ok=True)
+
+    # Provision default global config.ini if not present
+    default_ini_path = os.path.join(switch_config_dir, "config.ini")
+    if not os.path.exists(default_ini_path):
+        with open(default_ini_path, "w", encoding="utf-8") as f:
+            f.write(
+                "[sharpscale]\n"
+                "scaling_mode = 1\n"
+                "filter_type = 0\n"
+                "aspect_ratio = 0\n"
+                "sharpness = 100\n"
+                "force_1080p = 0\n"
+                "show_osd = 1\n"
+            )
+        print(" [+] Created default Switch config: switch/sharpscale/config.ini")
 
     # Artifact sources (check dist, compiled source trees, or pre-existing release binaries)
     artifact_mappings = [

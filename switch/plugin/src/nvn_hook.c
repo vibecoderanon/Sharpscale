@@ -32,6 +32,9 @@ void nvn_hook_queue_present_texture(void* queue, void* window, int texture_idx) 
     g_nvn_state.nvn_queue = queue;
     g_nvn_state.nvn_window = window;
 
+    /* Check for live settings update from Tesla Overlay via SharedMemory */
+    sharpscale_check_live_updates();
+
     /* If CAS sharpening is active, execute compute/graphics dispatch pass here */
     SharpscaleConfig* cfg = sharpscale_get_config();
     if (cfg->filter_type == FILTER_TYPE_CAS) {

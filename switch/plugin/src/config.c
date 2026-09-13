@@ -2,6 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+
+static void ensure_dir_exists(const char* dirpath) {
+    struct stat st;
+    if (stat(dirpath, &st) != 0) {
+        mkdir(dirpath, 0777);
+    }
+}
 
 void config_load_defaults(SharpscaleConfig* config) {
     if (!config) return;
@@ -132,6 +140,10 @@ bool config_load_title(uint64_t title_id, SharpscaleConfig* config) {
 }
 
 static bool write_ini_file(const char* filepath, const SharpscaleConfig* config) {
+    ensure_dir_exists("/switch");
+    ensure_dir_exists(SHARPSCALE_CONFIG_DIR);
+    ensure_dir_exists(SHARPSCALE_TITLE_CONFIG_DIR);
+
     FILE* f = fopen(filepath, "w");
     if (!f) return false;
 

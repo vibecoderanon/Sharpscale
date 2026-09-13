@@ -108,6 +108,7 @@ jobs:
         run: |
           rm -rf release
           mkdir -p release/switch/.overlays
+          mkdir -p release/switch/sharpscale/titles
           mkdir -p release/SaltySD/plugins
           mkdir -p release/3ds
           mkdir -p release/luma/plugins
@@ -117,6 +118,16 @@ jobs:
           find dist -name "Sharpscale-3DS.3dsx" -exec cp {} release/3ds/ \;
           find dist -name "sharpscale.3gx" -exec cp {} release/luma/plugins/ \;
           cp 3ds/firm_patcher/sharpscale_firm_patcher.py release/3ds/
+
+          cat << 'EOF' > release/switch/sharpscale/config.ini
+[sharpscale]
+scaling_mode = 1
+filter_type = 0
+aspect_ratio = 0
+sharpness = 100
+force_1080p = 0
+show_osd = 1
+EOF
 
           cd release && zip -r ../Sharpscale-MultiConsole-Suite.zip .
           cd ..
@@ -134,6 +145,7 @@ jobs:
             release/Sharpscale-MultiConsole-Suite.zip
             release/switch/.overlays/ovl-sharpscale.ovl
             release/SaltySD/plugins/sharpscale.elf
+            release/switch/sharpscale/config.ini
             release/3ds/Sharpscale-3DS.3dsx
             release/luma/plugins/sharpscale.3gx
             release/3ds/sharpscale_firm_patcher.py
@@ -148,6 +160,7 @@ jobs:
             - **`Sharpscale-MultiConsole-Suite.zip`**: All-in-one pre-packaged zip ready to extract to SD card root (`sdmc:/`).
             - **`ovl-sharpscale.ovl`**: Genuine Tesla Menu overlay (`sdmc:/switch/.overlays/`).
             - **`sharpscale.elf`**: Genuine SaltyNX VI/NVN hook plugin (`sdmc:/SaltySD/plugins/`).
+            - **`config.ini`**: Default configuration template (`sdmc:/switch/sharpscale/config.ini`).
             - **`Sharpscale-3DS.3dsx`**: Genuine Nintendo 3DS Homebrew Configurator (`sdmc:/3ds/`).
             - **`sharpscale.3gx`**: Genuine Luma3DS in-game 3GX plugin (`sdmc:/luma/plugins/`).
             - **`sharpscale_firm_patcher.py`**: Standalone PC/console FIRM scaling matrix patcher.

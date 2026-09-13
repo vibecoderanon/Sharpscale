@@ -1,16 +1,54 @@
 #define TESLA_INIT_IMPL
 #include "../include/sharpscale_overlay.hpp"
 #include "../../plugin/include/config.h"
+#include "../include/SaltyNX.h"
 #include <cstdio>
 #include <string>
 #include <vector>
 
+static SharedMemory s_shmem;
+static bool s_shmem_mapped = false;
+static SharpscaleSharedMemory* s_shmem_ptr = nullptr;
+static Handle s_remote_shmem_handle = 0;
+
 void SharpscaleOverlay::initServices() {
-    // Initialize libnx services (pminfo, etc.)
+    pminfoInitialize();
+    fsdevMountSdmc();
+
+    if (SaltySD_Connect() == 0) {
+        if (SaltySD_GetSharedMemoryHandle(&s_remote_shmem_handle) == 0 && s_remote_shmem_handle != 0) {
+            shmemLoadRemote(&s_shmem, s_remote_shmem_handle, 0x1000, Perm_Rw);
+            if (R_SUCCEEDED(shmemMap(&s_shmem))) {
+                s_shmem_mapped = true;
+                uint8_t* base = (uint8_t*)shmemGetMapAddress(&s_shmem);
+                if (base) {
+                    for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
+                        SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
+                        if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
+                            s_shmem_ptr = probe;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void SharpscaleOverlay::exitServices() {
-    // Clean up libnx services
+    if (s_shmem_mapped) {
+        shmemUnmap(&s_shmem);
+        shmemClose(&s_shmem);
+        s_shmem_mapped = false;
+        s_shmem_ptr = nullptr;
+    }
+    if (s_remote_shmem_handle != 0) {
+        svcCloseHandle(s_remote_shmem_handle);
+        s_remote_shmem_handle = 0;
+    }
+    SaltySD_Term();
+    fsdevUnmountDevice("sdmc");
+    pminfoExit();
 }
 
 void SharpscaleOverlay::onShow() {}
@@ -21,6 +59,19 @@ std::unique_ptr<tsl::Gui> SharpscaleOverlay::loadInitialGui() {
 }
 
 MainGui::MainGui() : m_current_title_id(0), m_is_game_running(false) {
+    tsl::hlp::doWithProcessList([this](const u64* pids, size_t count) {
+        for (size_t i = 0; i < count; i++) {
+            u64 tid = 0;
+            if (R_SUCCEEDED(pminfoGetProgramId(&tid, pids[i]))) {
+                if (tid >= 0x0100000000010000ULL && tid <= 0x01FFFFFFFFFFFFFFULL) {
+                    m_current_title_id = tid;
+                    m_is_game_running = true;
+                    break;
+                }
+            }
+        }
+    });
+
     refreshConfig();
 }
 
@@ -38,11 +89,51 @@ void MainGui::saveConfig() {
     } else {
         config_save_global(&m_config);
     }
+
+    if (!s_shmem_ptr && s_shmem_mapped) {
+        uint8_t* base = (uint8_t*)shmemGetMapAddress(&s_shmem);
+        if (base) {
+            for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
+                SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
+                if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
+                    s_shmem_ptr = probe;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (s_shmem_ptr) {
+        s_shmem_ptr->scaling_mode = static_cast<uint8_t>(m_config.scaling_mode);
+        s_shmem_ptr->filter_type = static_cast<uint8_t>(m_config.filter_type);
+        s_shmem_ptr->aspect_ratio = static_cast<uint8_t>(m_config.aspect_ratio);
+        s_shmem_ptr->sharpness = m_config.sharpness_strength;
+        s_shmem_ptr->force_1080p = m_config.force_1080p_capture ? 1 : 0;
+        s_shmem_ptr->show_osd = m_config.show_osd_notification ? 1 : 0;
+        s_shmem_ptr->sequence_id++;
+    }
 }
 
 tsl::elm::Element* MainGui::createUI() {
     auto frame = new tsl::elm::OverlayFrame("Sharpscale-NX", "v" SHARPSCALE_NX_VERSION_STRING);
     auto list = new tsl::elm::List();
+
+    // Section 0: Engine & Game Status
+    list->addItem(new tsl::elm::CategoryHeader("Sharpscale-NX Engine"));
+
+    char status_buf[96];
+    if (s_shmem_ptr && s_shmem_ptr->is_plugin_alive) {
+        snprintf(status_buf, sizeof(status_buf), "Active (%ux%u -> %ux%u)",
+            s_shmem_ptr->src_width, s_shmem_ptr->src_height,
+            s_shmem_ptr->vp_w, s_shmem_ptr->vp_h);
+    } else if (m_is_game_running) {
+        snprintf(status_buf, sizeof(status_buf), "Hooked (Title: %016llX)", (unsigned long long)m_current_title_id);
+    } else {
+        snprintf(status_buf, sizeof(status_buf), "Standby (No game active)");
+    }
+    auto statusItem = new tsl::elm::ListItem("Engine Status");
+    statusItem->setValue(status_buf);
+    list->addItem(statusItem);
 
     // Section 1: Scaling Mode
     list->addItem(new tsl::elm::CategoryHeader("Display Scaling"));

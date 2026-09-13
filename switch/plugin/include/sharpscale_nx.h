@@ -89,6 +89,35 @@ typedef struct {
     bool is_docked;
 } SharpscaleConfig;
 
+#define SHARPSCALE_SHMEM_MAGIC 0x53485250 // "SHRP"
+#define SHARPSCALE_SHMEM_VERSION 1
+
+/**
+ * Shared memory layout between SaltyNX plugin (game process)
+ * and Tesla Overlay (ovlmenu process).
+ */
+typedef struct {
+    uint32_t magic;           /**< "SHRP" = 0x53485250 */
+    uint32_t version;         /**< 1 */
+    uint32_t sequence_id;     /**< Increments whenever overlay changes config */
+    uint8_t scaling_mode;     /**< SharpscaleScalingMode */
+    uint8_t filter_type;      /**< SharpscaleFilterType */
+    uint8_t aspect_ratio;     /**< SharpscaleAspectRatio */
+    uint8_t sharpness;        /**< 0..100 */
+    uint8_t force_1080p;      /**< 0 or 1 */
+    uint8_t show_osd;         /**< 0 or 1 */
+    uint8_t is_plugin_alive;  /**< 1 when plugin is active in game */
+    uint8_t is_docked;        /**< 1 when Switch is docked */
+    uint32_t src_width;       /**< Detected game framebuffer width */
+    uint32_t src_height;      /**< Detected game framebuffer height */
+    uint32_t dst_width;       /**< Output display width */
+    uint32_t dst_height;      /**< Output display height */
+    uint32_t vp_x;            /**< Calculated viewport X */
+    uint32_t vp_y;            /**< Calculated viewport Y */
+    uint32_t vp_w;            /**< Calculated viewport W */
+    uint32_t vp_h;            /**< Calculated viewport H */
+} __attribute__((packed)) SharpscaleSharedMemory;
+
 /**
  * Global API functions
  */
@@ -97,6 +126,7 @@ void sharpscale_exit(void);
 SharpscaleConfig* sharpscale_get_config(void);
 void sharpscale_update_viewport(uint32_t src_w, uint32_t src_h, uint32_t dst_w, uint32_t dst_h);
 void sharpscale_apply_settings(void);
+void sharpscale_check_live_updates(void);
 
 #ifdef __cplusplus
 }
