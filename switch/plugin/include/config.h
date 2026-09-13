@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "sharpscale_nx.h"
 
 #ifdef __cplusplus

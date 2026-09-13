@@ -1,6 +1,7 @@
 #include "config.h"
 
 #ifdef __SWITCH_PLUGIN__
+#include <stddef.h>
 
 /* In plugin context (running inside retail game process), standard libc file/string I/O
  * from newlib is non-functional and triggers instruction aborts.

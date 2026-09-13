@@ -3,6 +3,7 @@
 #include "vi_hook.h"
 #include "scaler.h"
 #include "config.h"
+#include <stddef.h>
 
 static SharpscaleConfig g_config;
 static bool g_initialized = false;
