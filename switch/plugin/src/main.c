@@ -146,7 +146,8 @@ static void* find_free_aslr_address(size_t size) {
 static void sharpscale_init_shmem(void) {
     if (&SaltySD_CheckIfSharedMemoryAvailable && &SaltySD_GetSharedMemoryHandle) {
         ptrdiff_t offset = 0;
-        uint64_t rc = SaltySD_CheckIfSharedMemoryAvailable(&offset, sizeof(SharpscaleSharedMemory));
+        /* Request extra 16 bytes so we can offset past SaltyNX's reserved bytes at 0..3 */
+        uint64_t rc = SaltySD_CheckIfSharedMemoryAvailable(&offset, sizeof(SharpscaleSharedMemory) + 16);
         if (rc == 0) {
             uint32_t handle = 0;
             rc = SaltySD_GetSharedMemoryHandle(&handle);
@@ -154,10 +155,12 @@ static void sharpscale_init_shmem(void) {
                 void* map_addr = find_free_aslr_address(0x1000);
                 if (map_addr) {
                     uint32_t map_rc = raw_svcMapSharedMemory(handle, map_addr, 0x1000, 3 /* Perm_Rw */);
-                    if (&SaltySDCore_printf) {
-                        SaltySDCore_printf("Sharpscale: shmem map_addr=%p, rc=0x%x, offset=%ld\n", map_addr, map_rc, (long)offset);
-                    }
                     if (map_rc == 0) {
+                        /* SaltyNX uses shmem[0..3] for internal display sync & refresh rate.
+                         * Always offset by at least 16 bytes to prevent corruption. */
+                        if (offset < 16) {
+                            offset = 16;
+                        }
                         g_shmem = (SharpscaleSharedMemory*)((uint8_t*)map_addr + offset);
                         g_shmem->magic = SHARPSCALE_SHMEM_MAGIC;
                         g_shmem->version = SHARPSCALE_SHMEM_VERSION;
@@ -170,10 +173,14 @@ static void sharpscale_init_shmem(void) {
                         g_shmem->show_osd = g_config.show_osd_notification ? 1 : 0;
                         g_shmem->is_plugin_alive = 1;
                         g_shmem->is_docked = g_config.is_docked ? 1 : 0;
+                        g_shmem->title_id = g_config.title_id;
                         g_shmem->src_width = g_config.src_width;
                         g_shmem->src_height = g_config.src_height;
                         g_shmem->dst_width = g_config.dst_width;
                         g_shmem->dst_height = g_config.dst_height;
+                    }
+                    if (&SaltySDCore_printf) {
+                        SaltySDCore_printf("Sharpscale: shmem map_addr=%p, rc=0x%x, final_offset=%ld\n", map_addr, map_rc, (long)offset);
                     }
                 } else if (&SaltySDCore_printf) {
                     SaltySDCore_printf("Sharpscale: find_free_aslr_address failed\n");
@@ -244,7 +251,17 @@ void sharpscale_apply_settings(void) {
 void sharpscale_check_live_updates(void) {
     if (!g_initialized) return;
 
-    if (g_shmem && g_shmem->magic == SHARPSCALE_SHMEM_MAGIC) {
+    if (g_shmem && (g_shmem->magic == SHARPSCALE_SHMEM_MAGIC || (g_shmem->magic & 0xFFFF00FF) == (SHARPSCALE_SHMEM_MAGIC & 0xFFFF00FF))) {
+        /* Sync Title ID if detected by overlay but not kernel */
+        if (g_config.title_id == 0 && g_shmem->title_id != 0) {
+            sharpscale_apply_title_profile(g_shmem->title_id);
+            config_load_title(g_shmem->title_id, &g_config);
+            sharpscale_apply_settings();
+            if (&SaltySDCore_printf) {
+                SaltySDCore_printf("Sharpscale: synced title_id from overlay: 0x%016lx\n", g_shmem->title_id);
+            }
+        }
+
         if (g_shmem->sequence_id != g_last_seq) {
             g_last_seq = g_shmem->sequence_id;
             g_config.scaling_mode = (SharpscaleScalingMode)g_shmem->scaling_mode;
@@ -253,11 +270,18 @@ void sharpscale_check_live_updates(void) {
             g_config.sharpness_strength = g_shmem->sharpness;
             g_config.force_1080p_capture = (g_shmem->force_1080p != 0);
             sharpscale_apply_settings();
+            if (&SaltySDCore_printf) {
+                SaltySDCore_printf("Sharpscale: live update seq=%u mode=%d vp=(%d,%d,%d,%d)\n",
+                    g_last_seq, g_config.scaling_mode,
+                    (int)g_config.calculated_viewport.x, (int)g_config.calculated_viewport.y,
+                    (int)g_config.calculated_viewport.width, (int)g_config.calculated_viewport.height);
+            }
         }
 
         /* Report telemetry back to overlay */
         g_shmem->is_plugin_alive = 1;
         g_shmem->is_docked = g_config.is_docked ? 1 : 0;
+        if (g_shmem->title_id == 0) g_shmem->title_id = g_config.title_id;
         g_shmem->src_width = g_config.src_width;
         g_shmem->src_height = g_config.src_height;
         g_shmem->dst_width = g_config.dst_width;
@@ -276,6 +300,9 @@ void sharpscale_init(void) {
     config_load_global(&g_config);
 
     uint64_t tid = get_current_title_id();
+    if (&SaltySDCore_printf) {
+        SaltySDCore_printf("Sharpscale: detected title_id=0x%016lx\n", tid);
+    }
     if (tid != 0) {
         sharpscale_apply_title_profile(tid);
         config_load_title(tid, &g_config);

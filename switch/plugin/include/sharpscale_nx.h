@@ -109,6 +109,7 @@ typedef struct {
     uint8_t show_osd;         /**< 0 or 1 */
     uint8_t is_plugin_alive;  /**< 1 when plugin is active in game */
     uint8_t is_docked;        /**< 1 when Switch is docked */
+    uint64_t title_id;        /**< Title ID (Program ID) */
     uint32_t src_width;       /**< Detected game framebuffer width */
     uint32_t src_height;      /**< Detected game framebuffer height */
     uint32_t dst_width;       /**< Output display width */

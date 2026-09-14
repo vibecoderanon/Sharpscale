@@ -28,3 +28,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+screenshots&video/
+build_artifacts/
+

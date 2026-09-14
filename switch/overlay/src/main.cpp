@@ -11,42 +11,84 @@ static bool s_shmem_mapped = false;
 static SharpscaleSharedMemory* s_shmem_ptr = nullptr;
 static Handle s_remote_shmem_handle = 0;
 
+static Result s_debug_conn_rc = -1;
+static Result s_debug_handle_rc = -1;
+static Result s_debug_map_rc = -1;
+static ptrdiff_t s_debug_offset = -1;
+static uint32_t s_debug_magic_at_0 = 0;
+
+static bool checkSaltyPort() {
+    Handle h = 0;
+    for (int i = 0; i < 20; i++) {
+        if (R_SUCCEEDED(svcConnectToNamedPort(&h, "InjectServ"))) {
+            svcCloseHandle(h);
+            return true;
+        }
+        svcSleepThread(1'000'000); /* 1ms */
+    }
+    return false;
+}
+
+static bool loadSharedMemory() {
+    if (s_shmem_mapped) return true;
+
+    if (!checkSaltyPort()) return false;
+
+    s_debug_conn_rc = SaltySD_Connect();
+    if (s_debug_conn_rc != 0) return false;
+
+    Handle remote_handle = 0;
+    s_debug_handle_rc = SaltySD_GetSharedMemoryHandle(&remote_handle);
+    SaltySD_Term(); /* Always release the named port session immediately! */
+
+    if (R_FAILED(s_debug_handle_rc) || remote_handle == 0) return false;
+
+    s_remote_shmem_handle = remote_handle;
+    shmemLoadRemote(&s_shmem, remote_handle, 0x1000, Perm_Rw);
+    s_debug_map_rc = shmemMap(&s_shmem);
+    if (R_FAILED(s_debug_map_rc)) {
+        return false;
+    }
+
+    s_shmem_mapped = true;
+    return true;
+}
+
+static SharpscaleSharedMemory* findSharedMemoryBlock() {
+    if (!s_shmem_mapped) {
+        if (!loadSharedMemory()) return nullptr;
+    }
+
+    uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
+    if (!base) return nullptr;
+
+    s_debug_magic_at_0 = *(uint32_t*)base;
+
+    for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
+        uint32_t magic = *(uint32_t*)(base + off);
+        /* Match exact magic or masked (in case byte 1 was modified by SaltyNX refresh rate) */
+        if (magic == SHARPSCALE_SHMEM_MAGIC || (magic & 0xFFFF00FF) == (SHARPSCALE_SHMEM_MAGIC & 0xFFFF00FF)) {
+            s_debug_offset = (ptrdiff_t)off;
+            return (SharpscaleSharedMemory*)(base + off);
+        }
+    }
+    s_debug_offset = -1;
+    return nullptr;
+}
+
 void SharpscaleOverlay::initServices() {
     pminfoInitialize();
     fsdevMountSdmc();
-
-    if (SaltySD_Connect() == 0) {
-        if (SaltySD_GetSharedMemoryHandle(&s_remote_shmem_handle) == 0 && s_remote_shmem_handle != 0) {
-            shmemLoadRemote(&s_shmem, s_remote_shmem_handle, 0x1000, Perm_Rw);
-            if (R_SUCCEEDED(shmemMap(&s_shmem))) {
-                s_shmem_mapped = true;
-                uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
-                if (base) {
-                    for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
-                        SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
-                        if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
-                            s_shmem_ptr = probe;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    loadSharedMemory();
+    s_shmem_ptr = findSharedMemoryBlock();
 }
 
 void SharpscaleOverlay::exitServices() {
     if (s_shmem_mapped) {
-        shmemUnmap(&s_shmem);
         shmemClose(&s_shmem);
         s_shmem_mapped = false;
         s_shmem_ptr = nullptr;
     }
-    if (s_remote_shmem_handle != 0) {
-        svcCloseHandle(s_remote_shmem_handle);
-        s_remote_shmem_handle = 0;
-    }
-    SaltySD_Term();
     fsdevUnmountDevice("sdmc");
     pminfoExit();
 }
@@ -94,17 +136,8 @@ void MainGui::saveConfig() {
         config_save_global(&m_config);
     }
 
-    if (!s_shmem_ptr && s_shmem_mapped) {
-        uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
-        if (base) {
-            for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
-                SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
-                if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
-                    s_shmem_ptr = probe;
-                    break;
-                }
-            }
-        }
+    if (!s_shmem_ptr) {
+        s_shmem_ptr = findSharedMemoryBlock();
     }
 
     if (s_shmem_ptr) {
@@ -114,6 +147,9 @@ void MainGui::saveConfig() {
         s_shmem_ptr->sharpness = m_config.sharpness_strength;
         s_shmem_ptr->force_1080p = m_config.force_1080p_capture ? 1 : 0;
         s_shmem_ptr->show_osd = m_config.show_osd_notification ? 1 : 0;
+        if (s_shmem_ptr->title_id == 0 && m_current_title_id != 0) {
+            s_shmem_ptr->title_id = m_current_title_id;
+        }
         s_shmem_ptr->sequence_id++;
     }
 }
@@ -121,17 +157,8 @@ void MainGui::saveConfig() {
 void MainGui::updateTelemetry() {
     if (!m_status_item) return;
 
-    if (!s_shmem_ptr && s_shmem_mapped) {
-        uint8_t* base = (uint8_t*)shmemGetAddr(&s_shmem);
-        if (base) {
-            for (size_t off = 0; off + sizeof(SharpscaleSharedMemory) <= 0x1000; off += 4) {
-                SharpscaleSharedMemory* probe = (SharpscaleSharedMemory*)(base + off);
-                if (probe->magic == SHARPSCALE_SHMEM_MAGIC) {
-                    s_shmem_ptr = probe;
-                    break;
-                }
-            }
-        }
+    if (!s_shmem_ptr) {
+        s_shmem_ptr = findSharedMemoryBlock();
     }
 
     if (s_shmem_ptr && s_shmem_ptr->is_plugin_alive) {
@@ -151,7 +178,15 @@ void MainGui::updateTelemetry() {
             m_viewport_item->setValue(vp_buf);
         }
     } else if (m_is_game_running) {
-        m_status_item->setValue("Hooked");
+        char status_buf[64];
+        if (!s_shmem_mapped) {
+            snprintf(status_buf, sizeof(status_buf), "Hooked (Map: 0x%X)", (unsigned int)s_debug_map_rc);
+        } else if (s_debug_offset < 0) {
+            snprintf(status_buf, sizeof(status_buf), "Hooked (M0: 0x%08X)", (unsigned int)s_debug_magic_at_0);
+        } else {
+            snprintf(status_buf, sizeof(status_buf), "Hooked (Off: %ld)", (long)s_debug_offset);
+        }
+        m_status_item->setValue(status_buf);
     } else {
         m_status_item->setValue("Standby");
     }
