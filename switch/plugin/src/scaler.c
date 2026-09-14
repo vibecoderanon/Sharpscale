@@ -78,12 +78,16 @@ void scaler_calculate_viewport(
             int32_t vp_w = (int32_t)src_w;
             int32_t vp_h = (int32_t)src_h;
 
+            if (aspect != ASPECT_RATIO_AUTO) {
+                vp_w = round_f_to_i((float)vp_h * target_aspect);
+            }
+
             out_viewport->width = vp_w;
             out_viewport->height = vp_h;
             out_viewport->x = ((int32_t)dst_w - vp_w) / 2;
             out_viewport->y = ((int32_t)dst_h - vp_h) / 2;
 
-            if (out_scale_x) *out_scale_x = 1.0f;
+            if (out_scale_x) *out_scale_x = (float)vp_w / (float)src_w;
             if (out_scale_y) *out_scale_y = 1.0f;
             break;
         }
@@ -91,16 +95,28 @@ void scaler_calculate_viewport(
         case SCALING_MODE_INTEGER: {
             /* Maximum integer factor fit */
             uint32_t int_scale = scaler_get_max_integer_scale(src_w, src_h, dst_w, dst_h);
-            int32_t vp_w = (int32_t)(src_w * int_scale);
-            int32_t vp_h = (int32_t)(src_h * int_scale);
+            int32_t vp_w, vp_h;
+
+            vp_h = (int32_t)(src_h * int_scale);
+
+            if (aspect != ASPECT_RATIO_AUTO) {
+                /* Apply aspect ratio geometry correction */
+                vp_w = round_f_to_i((float)vp_h * target_aspect);
+                if (vp_w > (int32_t)dst_w) {
+                    vp_w = (int32_t)dst_w;
+                    vp_h = round_f_to_i((float)dst_w / target_aspect);
+                }
+            } else {
+                vp_w = (int32_t)(src_w * int_scale);
+            }
 
             out_viewport->width = vp_w;
             out_viewport->height = vp_h;
             out_viewport->x = ((int32_t)dst_w - vp_w) / 2;
             out_viewport->y = ((int32_t)dst_h - vp_h) / 2;
 
-            if (out_scale_x) *out_scale_x = (float)int_scale;
-            if (out_scale_y) *out_scale_y = (float)int_scale;
+            if (out_scale_x) *out_scale_x = (float)vp_w / (float)src_w;
+            if (out_scale_y) *out_scale_y = (float)vp_h / (float)src_h;
             break;
         }
 

@@ -22,6 +22,9 @@ typedef void (*PFN_nvnCommandBufferSetViewport)(void* cmdBuf, int x, int y, int 
 typedef void (*PFN_nvnCommandBufferSetViewports)(void* cmdBuf, int start, int count, const void* viewports);
 typedef void (*PFN_nvnCommandBufferSetScissor)(void* cmdBuf, int x, int y, int width, int height);
 typedef void (*PFN_nvnCommandBufferSetScissors)(void* cmdBuf, int start, int count, const void* scissors);
+typedef void (*PFN_nvnCommandBufferClearColor)(void* cmdBuf, int targetIndex, const float* color, int mask);
+typedef void (*PFN_nvnSamplerBuilderSetMinMagFilter)(void* builder, int minFilter, int magFilter);
+typedef uint8_t (*PFN_nvnSamplerInitialize)(void* sampler, const void* builder);
 
 typedef struct {
     float x;
@@ -55,6 +58,9 @@ typedef struct {
     PFN_nvnCommandBufferSetViewports orig_nvnCommandBufferSetViewports;
     PFN_nvnCommandBufferSetScissor orig_nvnCommandBufferSetScissor;
     PFN_nvnCommandBufferSetScissors orig_nvnCommandBufferSetScissors;
+    PFN_nvnCommandBufferClearColor orig_nvnCommandBufferClearColor;
+    PFN_nvnSamplerBuilderSetMinMagFilter orig_nvnSamplerBuilderSetMinMagFilter;
+    PFN_nvnSamplerInitialize orig_nvnSamplerInitialize;
 } NvnHookState;
 
 bool nvn_hook_init(void);
@@ -62,6 +68,7 @@ void nvn_hook_exit(void);
 void* nvn_hook_get_proc_address(void* device, const char* name);
 void nvn_hook_queue_present_texture(void* queue, void* window, int texture_idx);
 void nvn_hook_apply_scaling(void* window, uint32_t src_w, uint32_t src_h);
+void nvn_hook_apply_filter_type(SharpscaleFilterType filter);
 
 #ifdef __cplusplus
 }

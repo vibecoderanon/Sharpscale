@@ -12,6 +12,19 @@ typedef void* (*PFN_nvnBootstrapLoader)(const char* name);
 
 static NvnHookState g_nvn_state = {0};
 static PFN_nvnBootstrapLoader orig_nvnBootstrapLoader = NULL;
+static bool s_frame_cleared = false;
+static uint32_t s_main_pass_count = 0;
+static uint32_t s_scissor_pass_count = 0;
+
+typedef struct {
+    void* sampler;
+    void* builder;
+    bool is_valid;
+} TrackedSampler;
+
+#define MAX_TRACKED_SAMPLERS 64
+static TrackedSampler s_tracked_samplers[MAX_TRACKED_SAMPLERS] = {0};
+static int s_num_tracked_samplers = 0;
 
 static inline int fast_strcmp(const char* s1, const char* s2) {
     while (*s1 && (*s1 == *s2)) {
@@ -21,9 +34,74 @@ static inline int fast_strcmp(const char* s1, const char* s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
+void nvn_hook_sampler_builder_set_min_mag_filter(void* builder, int minFilter, int magFilter) {
+    SharpscaleConfig* cfg = sharpscale_get_config();
+
+    int effective_min = minFilter;
+    int effective_mag = magFilter;
+
+    if (cfg->filter_type == FILTER_TYPE_POINT || cfg->filter_type == FILTER_TYPE_SHARP_BILINEAR) {
+        effective_min = 0; /* NVN_MIN_FILTER_NEAREST */
+        effective_mag = 0; /* NVN_MAG_FILTER_NEAREST */
+    } else if (cfg->filter_type == FILTER_TYPE_BILINEAR || cfg->filter_type == FILTER_TYPE_CAS) {
+        effective_min = 1; /* NVN_MIN_FILTER_LINEAR */
+        effective_mag = 1; /* NVN_MAG_FILTER_LINEAR */
+    }
+
+    if (g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter) {
+        g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter(builder, effective_min, effective_mag);
+    }
+}
+
+uint8_t nvn_hook_sampler_initialize(void* sampler, const void* builder) {
+    if (sampler && builder && s_num_tracked_samplers < MAX_TRACKED_SAMPLERS) {
+        int idx = -1;
+        for (int i = 0; i < s_num_tracked_samplers; i++) {
+            if (s_tracked_samplers[i].sampler == sampler) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == -1) {
+            idx = s_num_tracked_samplers++;
+        }
+        s_tracked_samplers[idx].sampler = sampler;
+        s_tracked_samplers[idx].builder = (void*)builder;
+        s_tracked_samplers[idx].is_valid = true;
+    }
+
+    if (g_nvn_state.orig_nvnSamplerInitialize) {
+        return g_nvn_state.orig_nvnSamplerInitialize(sampler, builder);
+    }
+    return 1;
+}
+
+void nvn_hook_apply_filter_type(SharpscaleFilterType filter) {
+    if (!g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter || !g_nvn_state.orig_nvnSamplerInitialize) {
+        return;
+    }
+
+    int target_min = (filter == FILTER_TYPE_POINT || filter == FILTER_TYPE_SHARP_BILINEAR) ? 0 : 1;
+    int target_mag = target_min;
+
+    for (int i = 0; i < s_num_tracked_samplers; i++) {
+        if (s_tracked_samplers[i].is_valid && s_tracked_samplers[i].sampler && s_tracked_samplers[i].builder) {
+            g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter(
+                s_tracked_samplers[i].builder, target_min, target_mag);
+            g_nvn_state.orig_nvnSamplerInitialize(
+                s_tracked_samplers[i].sampler, s_tracked_samplers[i].builder);
+        }
+    }
+}
+
 void nvn_hook_queue_present_texture(void* queue, void* window, int texture_idx) {
     g_nvn_state.nvn_queue = queue;
     g_nvn_state.nvn_window = window;
+
+    /* Reset per-frame pass counters and clear state */
+    s_frame_cleared = false;
+    s_main_pass_count = 0;
+    s_scissor_pass_count = 0;
 
     /* Check for live settings update from Tesla Overlay via SharedMemory */
     sharpscale_check_live_updates();
@@ -62,33 +140,39 @@ void nvn_hook_window_builder_set_textures(void* builder, int numTextures, void**
     }
 }
 
-static int s_last_vp_x = -999, s_last_vp_y = -999, s_last_vp_w = -999, s_last_vp_h = -999;
-
 void nvn_hook_command_buffer_set_viewport(void* cmdBuf, int x, int y, int width, int height) {
     SharpscaleConfig* cfg = sharpscale_get_config();
-
-    if (x != s_last_vp_x || y != s_last_vp_y || width != s_last_vp_w || height != s_last_vp_h) {
-        s_last_vp_x = x; s_last_vp_y = y; s_last_vp_w = width; s_last_vp_h = height;
-        if (&SaltySDCore_printf) {
-            SaltySDCore_printf("Sharpscale: SetViewport(%d, %d, %d, %d)\n", x, y, width, height);
-        }
-    }
 
     /* Intercept the main display/presentation viewport pass */
     bool is_main_pass = (width == (int)cfg->dst_width && height == (int)cfg->dst_height) ||
                         (width >= 1280 && height >= 720 && x == 0 && y == 0);
 
     if (is_main_pass && cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
-        if (g_nvn_state.orig_nvnCommandBufferSetViewport) {
-            g_nvn_state.orig_nvnCommandBufferSetViewport(
-                cmdBuf,
-                (int)cfg->calculated_viewport.x,
-                (int)cfg->calculated_viewport.y,
-                (int)cfg->calculated_viewport.width,
-                (int)cfg->calculated_viewport.height
-            );
+        uint32_t pass = s_main_pass_count++;
+
+        /* Only scale the primary game pass (pass 0).
+         * Subsequent passes (such as the suspend menu / UI) stay unscaled
+         * at full resolution to prevent duplicate/corrupted UI elements. */
+        if (pass == 0) {
+            /* Clear full swapchain buffer to solid black to eliminate all frozen remnants/trails */
+            if (!s_frame_cleared && g_nvn_state.orig_nvnCommandBufferClearColor && g_nvn_state.orig_nvnCommandBufferSetScissor) {
+                static const float s_black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                g_nvn_state.orig_nvnCommandBufferSetScissor(cmdBuf, 0, 0, (int)cfg->dst_width, (int)cfg->dst_height);
+                g_nvn_state.orig_nvnCommandBufferClearColor(cmdBuf, 0, s_black, 0xF /* NVN_CLEAR_COLOR_MASK_RGBA */);
+                s_frame_cleared = true;
+            }
+
+            if (g_nvn_state.orig_nvnCommandBufferSetViewport) {
+                g_nvn_state.orig_nvnCommandBufferSetViewport(
+                    cmdBuf,
+                    (int)cfg->calculated_viewport.x,
+                    (int)cfg->calculated_viewport.y,
+                    (int)cfg->calculated_viewport.width,
+                    (int)cfg->calculated_viewport.height
+                );
+            }
+            return;
         }
-        return;
     }
 
     if (g_nvn_state.orig_nvnCommandBufferSetViewport) {
@@ -103,16 +187,20 @@ void nvn_hook_command_buffer_set_scissor(void* cmdBuf, int x, int y, int width, 
                         (width >= 1280 && height >= 720 && x == 0 && y == 0);
 
     if (is_main_pass && cfg->scaling_mode != SCALING_MODE_ORIGINAL && cfg->calculated_viewport.width > 0) {
-        if (g_nvn_state.orig_nvnCommandBufferSetScissor) {
-            g_nvn_state.orig_nvnCommandBufferSetScissor(
-                cmdBuf,
-                (int)cfg->calculated_viewport.x,
-                (int)cfg->calculated_viewport.y,
-                (int)cfg->calculated_viewport.width,
-                (int)cfg->calculated_viewport.height
-            );
+        uint32_t pass = s_scissor_pass_count++;
+
+        if (pass == 0) {
+            if (g_nvn_state.orig_nvnCommandBufferSetScissor) {
+                g_nvn_state.orig_nvnCommandBufferSetScissor(
+                    cmdBuf,
+                    (int)cfg->calculated_viewport.x,
+                    (int)cfg->calculated_viewport.y,
+                    (int)cfg->calculated_viewport.width,
+                    (int)cfg->calculated_viewport.height
+                );
+            }
+            return;
         }
-        return;
     }
 
     if (g_nvn_state.orig_nvnCommandBufferSetScissor) {
@@ -133,11 +221,20 @@ void nvn_hook_command_buffer_set_viewports(void* cmdBuf, int start, int count, c
             vps[i] = src_vps[i];
             if ((vps[i].width == (float)cfg->dst_width && vps[i].height == (float)cfg->dst_height) ||
                 (vps[i].width >= 1280.0f && vps[i].height >= 720.0f && vps[i].x == 0.0f && vps[i].y == 0.0f)) {
-                vps[i].x = (float)cfg->calculated_viewport.x;
-                vps[i].y = (float)cfg->calculated_viewport.y;
-                vps[i].width = (float)cfg->calculated_viewport.width;
-                vps[i].height = (float)cfg->calculated_viewport.height;
-                modified = true;
+                uint32_t pass = s_main_pass_count++;
+                if (pass == 0) {
+                    if (!s_frame_cleared && g_nvn_state.orig_nvnCommandBufferClearColor && g_nvn_state.orig_nvnCommandBufferSetScissor) {
+                        static const float s_black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                        g_nvn_state.orig_nvnCommandBufferSetScissor(cmdBuf, 0, 0, (int)cfg->dst_width, (int)cfg->dst_height);
+                        g_nvn_state.orig_nvnCommandBufferClearColor(cmdBuf, 0, s_black, 0xF);
+                        s_frame_cleared = true;
+                    }
+                    vps[i].x = (float)cfg->calculated_viewport.x;
+                    vps[i].y = (float)cfg->calculated_viewport.y;
+                    vps[i].width = (float)cfg->calculated_viewport.width;
+                    vps[i].height = (float)cfg->calculated_viewport.height;
+                    modified = true;
+                }
             }
         }
 
@@ -165,11 +262,14 @@ void nvn_hook_command_buffer_set_scissors(void* cmdBuf, int start, int count, co
             scs[i] = src_scs[i];
             if ((scs[i].width == (int)cfg->dst_width && scs[i].height == (int)cfg->dst_height) ||
                 (scs[i].width >= 1280 && scs[i].height >= 720 && scs[i].x == 0 && scs[i].y == 0)) {
-                scs[i].x = (int)cfg->calculated_viewport.x;
-                scs[i].y = (int)cfg->calculated_viewport.y;
-                scs[i].width = (int)cfg->calculated_viewport.width;
-                scs[i].height = (int)cfg->calculated_viewport.height;
-                modified = true;
+                uint32_t pass = s_scissor_pass_count++;
+                if (pass == 0) {
+                    scs[i].x = (int)cfg->calculated_viewport.x;
+                    scs[i].y = (int)cfg->calculated_viewport.y;
+                    scs[i].width = (int)cfg->calculated_viewport.width;
+                    scs[i].height = (int)cfg->calculated_viewport.height;
+                    modified = true;
+                }
             }
         }
 
@@ -195,6 +295,19 @@ void* nvn_hook_device_get_proc_address(void* device, const char* name) {
         g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)orig_nvnBootstrapLoader("nvnDeviceGetProcAddress");
         if (g_nvn_state.orig_nvnDeviceGetProcAddress) {
             address = g_nvn_state.orig_nvnDeviceGetProcAddress(device, name);
+        }
+    }
+
+    /* Proactively fetch clear and sampler proc addresses when device is acquired */
+    if (device && g_nvn_state.orig_nvnDeviceGetProcAddress) {
+        if (!g_nvn_state.orig_nvnCommandBufferClearColor) {
+            g_nvn_state.orig_nvnCommandBufferClearColor = (PFN_nvnCommandBufferClearColor)g_nvn_state.orig_nvnDeviceGetProcAddress(device, "nvnCommandBufferClearColor");
+        }
+        if (!g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter) {
+            g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter = (PFN_nvnSamplerBuilderSetMinMagFilter)g_nvn_state.orig_nvnDeviceGetProcAddress(device, "nvnSamplerBuilderSetMinMagFilter");
+        }
+        if (!g_nvn_state.orig_nvnSamplerInitialize) {
+            g_nvn_state.orig_nvnSamplerInitialize = (PFN_nvnSamplerInitialize)g_nvn_state.orig_nvnDeviceGetProcAddress(device, "nvnSamplerInitialize");
         }
     }
 
@@ -226,6 +339,18 @@ void* nvn_hook_device_get_proc_address(void* device, const char* name) {
     if (fast_strcmp(name, "nvnCommandBufferSetScissors") == 0) {
         g_nvn_state.orig_nvnCommandBufferSetScissors = (PFN_nvnCommandBufferSetScissors)address;
         return (void*)nvn_hook_command_buffer_set_scissors;
+    }
+    if (fast_strcmp(name, "nvnCommandBufferClearColor") == 0) {
+        g_nvn_state.orig_nvnCommandBufferClearColor = (PFN_nvnCommandBufferClearColor)address;
+        return address;
+    }
+    if (fast_strcmp(name, "nvnSamplerBuilderSetMinMagFilter") == 0) {
+        g_nvn_state.orig_nvnSamplerBuilderSetMinMagFilter = (PFN_nvnSamplerBuilderSetMinMagFilter)address;
+        return (void*)nvn_hook_sampler_builder_set_min_mag_filter;
+    }
+    if (fast_strcmp(name, "nvnSamplerInitialize") == 0) {
+        g_nvn_state.orig_nvnSamplerInitialize = (PFN_nvnSamplerInitialize)address;
+        return (void*)nvn_hook_sampler_initialize;
     }
     if (fast_strcmp(name, "nvnTextureGetWidth") == 0) {
         g_nvn_state.orig_nvnTextureGetWidth = (PFN_nvnTextureGetWidth)address;

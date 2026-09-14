@@ -264,15 +264,21 @@ void sharpscale_check_live_updates(void) {
 
         if (g_shmem->sequence_id != g_last_seq) {
             g_last_seq = g_shmem->sequence_id;
+            SharpscaleFilterType old_filter = g_config.filter_type;
             g_config.scaling_mode = (SharpscaleScalingMode)g_shmem->scaling_mode;
             g_config.filter_type = (SharpscaleFilterType)g_shmem->filter_type;
             g_config.aspect_ratio = (SharpscaleAspectRatio)g_shmem->aspect_ratio;
             g_config.sharpness_strength = g_shmem->sharpness;
             g_config.force_1080p_capture = (g_shmem->force_1080p != 0);
+
+            if (g_config.filter_type != old_filter) {
+                nvn_hook_apply_filter_type(g_config.filter_type);
+            }
+
             sharpscale_apply_settings();
             if (&SaltySDCore_printf) {
-                SaltySDCore_printf("Sharpscale: live update seq=%u mode=%d vp=(%d,%d,%d,%d)\n",
-                    g_last_seq, g_config.scaling_mode,
+                SaltySDCore_printf("Sharpscale: live update seq=%u mode=%d filter=%d vp=(%d,%d,%d,%d)\n",
+                    g_last_seq, g_config.scaling_mode, g_config.filter_type,
                     (int)g_config.calculated_viewport.x, (int)g_config.calculated_viewport.y,
                     (int)g_config.calculated_viewport.width, (int)g_config.calculated_viewport.height);
             }
@@ -312,6 +318,7 @@ void sharpscale_init(void) {
 
     vi_hook_init();
     nvn_hook_init();
+    nvn_hook_apply_filter_type(g_config.filter_type);
 
     g_initialized = true;
     sharpscale_apply_settings();
