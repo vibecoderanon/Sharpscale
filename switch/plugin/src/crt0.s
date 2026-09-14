@@ -27,3 +27,45 @@ entrypoint:
     ldp x29, x30, [sp], #16
     mov x0, #0
     ret
+
+.global raw_svcGetInfo
+.type raw_svcGetInfo, %function
+raw_svcGetInfo:
+    str x0, [sp, #-16]!
+    svc 0x29
+    ldr x2, [sp], #16
+    cbz w0, 1f
+    ret
+1:
+    cbz x2, 2f
+    str x1, [x2]
+2:
+    ret
+
+.global raw_svcQueryMemory
+.type raw_svcQueryMemory, %function
+raw_svcQueryMemory:
+    str x1, [sp, #-16]!
+    svc 0x6
+    ldr x2, [sp], #16
+    cbz w0, 1f
+    ret
+1:
+    cbz x2, 2f
+    str w1, [x2]
+2:
+    ret
+
+.global raw_svcMapSharedMemory
+.type raw_svcMapSharedMemory, %function
+raw_svcMapSharedMemory:
+    svc 0x13
+    ret
+
+.global raw_svcUnmapSharedMemory
+.type raw_svcUnmapSharedMemory, %function
+raw_svcUnmapSharedMemory:
+    svc 0x14
+    ret
+
+

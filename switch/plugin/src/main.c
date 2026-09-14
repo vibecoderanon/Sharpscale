@@ -25,50 +25,12 @@ typedef struct {
     uint32_t device_refcount;
     uint32_t pad;
 } SwitchMemoryInfo;
+/* Raw SVC functions implemented in crt0.s */
+extern uint32_t raw_svcGetInfo(uint64_t* out, uint32_t id0, uint64_t handle, uint64_t id1);
+extern uint32_t raw_svcQueryMemory(SwitchMemoryInfo* info, uint32_t* page_info, uint64_t address);
+extern uint32_t raw_svcMapSharedMemory(uint32_t handle, void* address, size_t size, uint32_t permission);
+extern uint32_t raw_svcUnmapSharedMemory(uint32_t handle, void* address, size_t size);
 
-static inline uint32_t raw_svcQueryMemory(SwitchMemoryInfo* info, uint32_t* page_info, uint64_t address) {
-    register uint64_t x0 __asm__("x0") = (uint64_t)info;
-    register uint64_t x1 __asm__("x1") = (uint64_t)page_info;
-    register uint64_t x2 __asm__("x2") = address;
-    __asm__ __volatile__ (
-        "svc 0x06"
-        : "+r"(x0)
-        : "r"(x1), "r"(x2)
-        : "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
-    );
-    return (uint32_t)x0;
-}
-
-static inline uint32_t raw_svcMapSharedMemory(uint32_t handle, void* address, size_t size, uint32_t permission) {
-    register uint64_t x0 __asm__("x0") = (uint64_t)handle;
-    register uint64_t x1 __asm__("x1") = (uint64_t)address;
-    register uint64_t x2 __asm__("x2") = (uint64_t)size;
-    register uint64_t x3 __asm__("x3") = (uint64_t)permission;
-    __asm__ __volatile__ (
-        "svc 0x13"
-        : "+r"(x0)
-        : "r"(x1), "r"(x2), "r"(x3)
-        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
-    );
-    return (uint32_t)x0;
-}
-
-static inline uint32_t raw_svcGetInfo(uint64_t* out, uint32_t id0, uint64_t handle, uint64_t id1) {
-    register uint64_t x0 __asm__("x0");
-    register uint64_t x1 __asm__("x1") = (uint64_t)id0;
-    register uint64_t x2 __asm__("x2") = handle;
-    register uint64_t x3 __asm__("x3") = id1;
-    __asm__ __volatile__ (
-        "svc 0x29"
-        : "=r"(x0), "=r"(x1)
-        : "r"(x1), "r"(x2), "r"(x3)
-        : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
-    );
-    if (x0 == 0 && out) {
-        *out = x1;
-    }
-    return (uint32_t)x0;
-}
 
 static inline uint64_t get_current_title_id(void) {
     uint64_t title_id = 0;
@@ -120,39 +82,66 @@ static void* find_free_aslr_address(size_t size) {
     uint32_t rc1 = raw_svcGetInfo(&aslr_base, 12 /* InfoType_AslrRegionAddress */, 0xFFFF8001ULL, 0);
     uint32_t rc2 = raw_svcGetInfo(&aslr_size, 13 /* InfoType_AslrRegionSize */, 0xFFFF8001ULL, 0);
 
-    if (rc1 != 0 || rc2 != 0 || aslr_size == 0) {
-        // Fallback to alias region if ASLR region query fails
-        raw_svcGetInfo(&aslr_base, 2 /* InfoType_AliasRegionAddress */, 0xFFFF8001ULL, 0);
-        raw_svcGetInfo(&aslr_size, 3 /* InfoType_AliasRegionSize */, 0xFFFF8001ULL, 0);
+    if (rc1 != 0 || aslr_base == 0) {
+        aslr_base = 0x8000000ULL;
     }
+    if (rc2 != 0 || aslr_size == 0) {
+        aslr_size = 0x1000000000ULL; /* 64GB default ASLR space */
+    }
+
+    uint64_t alias_base = 0, alias_size = 0;
+    raw_svcGetInfo(&alias_base, 2 /* InfoType_AliasRegionAddress */, 0xFFFF8001ULL, 0);
+    raw_svcGetInfo(&alias_size, 3 /* InfoType_AliasRegionSize */, 0xFFFF8001ULL, 0);
+
+    uint64_t heap_base = 0, heap_size = 0;
+    raw_svcGetInfo(&heap_base, 4 /* InfoType_HeapRegionAddress */, 0xFFFF8001ULL, 0);
+    raw_svcGetInfo(&heap_size, 5 /* InfoType_HeapRegionSize */, 0xFFFF8001ULL, 0);
 
     if (&SaltySDCore_printf) {
-        SaltySDCore_printf("Sharpscale: aslr_base=0x%lx, aslr_size=0x%lx, rc=0x%x\n", aslr_base, aslr_size, rc1);
+        SaltySDCore_printf("Sharpscale: aslr=0x%lx+0x%lx, alias=0x%lx+0x%lx, heap=0x%lx+0x%lx, rc1=0x%x, rc2=0x%x\n",
+            aslr_base, aslr_size, alias_base, alias_size, heap_base, heap_size, rc1, rc2);
     }
 
-    if (aslr_size == 0) return NULL;
-
-    // Scan for unmapped page inside ASLR region
-    uint64_t addr = aslr_base + 0x1000000ULL; // 16MB into ASLR
+    /* Scan for unmapped page inside ASLR region */
+    uint64_t addr = aslr_base + 0x20000000ULL; /* 512MB into ASLR to avoid lower mappings */
     SwitchMemoryInfo minfo;
     uint32_t pinfo = 0;
-    while (addr < aslr_base + aslr_size - size) {
-        if (raw_svcQueryMemory(&minfo, &pinfo, addr) != 0) {
-            addr += 0x200000;
+
+    for (int attempts = 0; attempts < 512 && addr + size < aslr_base + aslr_size; attempts++) {
+        /* Avoid alias region */
+        if (alias_size > 0 && addr < alias_base + alias_size && addr + size > alias_base) {
+            addr = alias_base + alias_size + 0x1000;
             continue;
         }
+        /* Avoid heap region */
+        if (heap_size > 0 && addr < heap_base + heap_size && addr + size > heap_base) {
+            addr = heap_base + heap_size + 0x1000;
+            continue;
+        }
+
+        uint32_t qrc = raw_svcQueryMemory(&minfo, &pinfo, addr);
+        if (qrc != 0) {
+            addr += 0x200000ULL;
+            continue;
+        }
+
         if (minfo.type == 0 && minfo.size >= size) {
-            uint64_t candidate = minfo.base_addr;
+            uint64_t candidate = (addr + 0xFFFULL) & ~0xFFFULL;
             if (candidate < aslr_base) candidate = aslr_base;
             if (candidate + size <= minfo.base_addr + minfo.size && candidate + size <= aslr_base + aslr_size) {
                 return (void*)candidate;
             }
         }
-        if (minfo.size == 0) break;
-        addr = minfo.base_addr + minfo.size;
+
+        if (minfo.size == 0) {
+            addr += 0x200000ULL;
+        } else {
+            addr = minfo.base_addr + minfo.size;
+        }
     }
     return NULL;
 }
+
 
 static void sharpscale_init_shmem(void) {
     if (&SaltySD_CheckIfSharedMemoryAvailable && &SaltySD_GetSharedMemoryHandle) {
