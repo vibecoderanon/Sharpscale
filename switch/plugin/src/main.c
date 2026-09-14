@@ -54,16 +54,19 @@ static inline uint32_t raw_svcMapSharedMemory(uint32_t handle, void* address, si
 }
 
 static inline uint32_t raw_svcGetInfo(uint64_t* out, uint32_t id0, uint64_t handle, uint64_t id1) {
-    register uint64_t x0 __asm__("x0") = (uint64_t)out;
+    register uint64_t x0 __asm__("x0");
     register uint64_t x1 __asm__("x1") = (uint64_t)id0;
     register uint64_t x2 __asm__("x2") = handle;
     register uint64_t x3 __asm__("x3") = id1;
     __asm__ __volatile__ (
         "svc 0x29"
-        : "+r"(x0)
+        : "=r"(x0), "=r"(x1)
         : "r"(x1), "r"(x2), "r"(x3)
         : "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "cc", "memory"
     );
+    if (x0 == 0 && out) {
+        *out = x1;
+    }
     return (uint32_t)x0;
 }
 
@@ -123,13 +126,14 @@ static void* find_free_aslr_address(size_t size) {
         raw_svcGetInfo(&aslr_size, 3 /* InfoType_AliasRegionSize */, 0xFFFF8001ULL, 0);
     }
 
+    if (&SaltySDCore_printf) {
+        SaltySDCore_printf("Sharpscale: aslr_base=0x%lx, aslr_size=0x%lx, rc=0x%x\n", aslr_base, aslr_size, rc1);
+    }
+
     if (aslr_size == 0) return NULL;
 
-    // Scan for unmapped space inside the ASLR region
-    // Start scanning 512MB into ASLR region to avoid collisions with game binary segments
-    uint64_t addr = aslr_base + 0x20000000ULL;
-    if (addr >= aslr_base + aslr_size) addr = aslr_base + 0x200000ULL;
-
+    // Scan for unmapped page inside ASLR region
+    uint64_t addr = aslr_base + 0x1000000ULL; // 16MB into ASLR
     SwitchMemoryInfo minfo;
     uint32_t pinfo = 0;
     while (addr < aslr_base + aslr_size - size) {
@@ -137,8 +141,12 @@ static void* find_free_aslr_address(size_t size) {
             addr += 0x200000;
             continue;
         }
-        if (minfo.type == 0 && minfo.size >= size && minfo.base_addr >= aslr_base) {
-            return (void*)minfo.base_addr;
+        if (minfo.type == 0 && minfo.size >= size) {
+            uint64_t candidate = minfo.base_addr;
+            if (candidate < aslr_base) candidate = aslr_base;
+            if (candidate + size <= minfo.base_addr + minfo.size && candidate + size <= aslr_base + aslr_size) {
+                return (void*)candidate;
+            }
         }
         if (minfo.size == 0) break;
         addr = minfo.base_addr + minfo.size;

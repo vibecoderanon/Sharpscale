@@ -265,10 +265,9 @@ bool nvn_hook_init(void) {
             orig_nvnBootstrapLoader = (PFN_nvnBootstrapLoader)SaltySDCore_FindSymbol("nvnBootstrapLoader");
         }
         if (orig_nvnBootstrapLoader) {
-            g_nvn_state.orig_nvnDeviceGetProcAddress = (PFN_nvnDeviceGetProcAddress)orig_nvnBootstrapLoader("nvnDeviceGetProcAddress");
             SaltySDCore_ReplaceImport("nvnBootstrapLoader", (void*)nvn_hook_bootstrap_loader);
             if (&SaltySDCore_printf) {
-                SaltySDCore_printf("Sharpscale: nvnBootstrapLoader hooked (orig_dev_get_proc=%p)\n", g_nvn_state.orig_nvnDeviceGetProcAddress);
+                SaltySDCore_printf("Sharpscale: nvnBootstrapLoader hooked at %p\n", orig_nvnBootstrapLoader);
             }
             g_nvn_state.is_installed = true;
             return true;
